@@ -5,5 +5,5 @@
 //! - Geocoding API (location search)
 
 pub mod client;
-
+pub mod args;
 pub use client::{ForecastClient, GeocodingClient, OpenMeteoClient};
