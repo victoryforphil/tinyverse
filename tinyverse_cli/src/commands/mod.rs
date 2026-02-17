@@ -1,6 +1,8 @@
 pub mod config;
+pub mod debug;
 pub mod kill;
 pub mod list;
+pub mod output;
 pub mod path;
 pub mod providers;
 pub mod send;

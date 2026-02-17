@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 
 use crate::commands::{
-    config::command::ConfigCommands, kill::args::KillArgs, send::args::SendArgs,
-    spawn::args::SpawnArgs, view::args::ViewArgs,
+    config::command::ConfigCommands, debug::args::DebugCommands, kill::args::KillArgs,
+    send::args::SendArgs, spawn::args::SpawnArgs, view::args::ViewArgs,
 };
 
 #[derive(Debug, Parser)]
@@ -38,4 +38,9 @@ pub enum Commands {
     View(ViewArgs),
     /// Send command to a session panel
     Send(SendArgs),
+    /// Debugging utilities
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommands,
+    },
 }

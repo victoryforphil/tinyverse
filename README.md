@@ -47,3 +47,6 @@
     - `send {command}` // Send a command to the console panel of a session
         - `--session={id}` // Which session to send the command to, defaults to the current session if inside said tmux session (called by the agent itself)
         - `--panel={console|agent|(panel_id)}` // Which panel to send the command to, defaults to console when theres just one (or first one)
+    - `debug` // Debugging utilities for sessions, like viewing logs, getting session info, etc.
+        - `self` // Check to see if we are in a tmux session, and if so print out info on the session and panels to stdout for the agent to use. Useful for debugging and for agents to understand their environment.
+            -- `--format={text|json}` // Output format, defaults to text but json is also available for easier parsing by agents

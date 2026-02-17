@@ -13,5 +13,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::Kill(args) => commands::kill::command::execute(args),
         Commands::View(args) => commands::view::command::execute(args),
         Commands::Send(args) => commands::send::command::execute(args),
+        Commands::Debug { command } => commands::debug::command::execute(command),
     }
 }
