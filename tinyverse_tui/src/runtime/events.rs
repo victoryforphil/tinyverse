@@ -14,7 +14,8 @@ use tinyverse_lib::{
 };
 
 use crate::app::{
-    App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction, PanePreview, SidebarTab,
+    App, AppMode, DividerDrag, FooterHotkeyAction, MENU_ACTIONS, MenuAction, PanePreview,
+    SidebarTab,
 };
 use crate::prefs::{self, TuiPrefs};
 
@@ -65,10 +66,9 @@ fn handle_key_event(
             KeyCode::Char('i') | KeyCode::Tab => app.toggle_inspector(),
             KeyCode::Char(']') => app.next_sidebar_tab(),
             KeyCode::Char('[') => app.prev_sidebar_tab(),
-            KeyCode::Char('1') => app.set_sidebar_tab(SidebarTab::Inspector),
-            KeyCode::Char('2') => app.set_sidebar_tab(SidebarTab::Console),
-            KeyCode::Char('3') => app.set_sidebar_tab(SidebarTab::Agent),
-            KeyCode::Char('4') => app.set_sidebar_tab(SidebarTab::Chat),
+            KeyCode::Char('1') => app.set_sidebar_tab(SidebarTab::Console),
+            KeyCode::Char('2') => app.set_sidebar_tab(SidebarTab::Agent),
+            KeyCode::Char('3') => app.set_sidebar_tab(SidebarTab::Chat),
             KeyCode::Enter => app.open_action_menu(),
             KeyCode::Char('a') => attach_selected_session(terminal, app)?,
             KeyCode::Char('s') => {
@@ -254,8 +254,12 @@ fn handle_mouse_event(
                 refresh_selected_preview(app);
                 return Ok(());
             }
-            if app.inspector_visible && is_near_divider(x, app) {
-                app.dragging_divider = true;
+            if app.inspector_visible && is_near_vertical_divider(x, app) {
+                app.dragging_divider = Some(DividerDrag::Vertical);
+                return Ok(());
+            }
+            if app.inspector_visible && is_near_horizontal_divider(y, app) {
+                app.dragging_divider = Some(DividerDrag::Horizontal);
                 return Ok(());
             }
             if let Some(index) = card_index_from_position(x, y, app) {
@@ -272,13 +276,13 @@ fn handle_mouse_event(
                 app.action_menu_anchor = Some((x, y));
             }
         }
-        MouseEventKind::Drag(MouseButton::Left) => {
-            if app.dragging_divider {
-                update_divider_ratio(x, app);
-            }
-        }
+        MouseEventKind::Drag(MouseButton::Left) => match app.dragging_divider {
+            Some(DividerDrag::Vertical) => update_vertical_divider_ratio(x, app),
+            Some(DividerDrag::Horizontal) => update_horizontal_divider_height(y, app),
+            None => {}
+        },
         MouseEventKind::Up(MouseButton::Left) => {
-            app.dragging_divider = false;
+            app.dragging_divider = None;
         }
         MouseEventKind::ScrollDown => app.select_next(),
         MouseEventKind::ScrollUp => app.select_prev(),
@@ -848,14 +852,21 @@ fn card_index_from_position(x: u16, y: u16, app: &App) -> Option<usize> {
         .find_map(|(index, rect)| rect_contains(*rect, x, y).then_some(*index))
 }
 
-fn is_near_divider(x: u16, app: &App) -> bool {
+fn is_near_vertical_divider(x: u16, app: &App) -> bool {
     let Some(divider_x) = app.layout.divider_x else {
         return false;
     };
     x.abs_diff(divider_x) <= 1
 }
 
-fn update_divider_ratio(x: u16, app: &mut App) {
+fn is_near_horizontal_divider(y: u16, app: &App) -> bool {
+    let Some(divider_y) = app.layout.divider_y else {
+        return false;
+    };
+    y.abs_diff(divider_y) <= 1
+}
+
+fn update_vertical_divider_ratio(x: u16, app: &mut App) {
     let Some(body_rect) = app.layout.body_rect else {
         return;
     };
@@ -865,7 +876,24 @@ fn update_divider_ratio(x: u16, app: &mut App) {
 
     let relative = x.saturating_sub(body_rect.x) as f32;
     let ratio = ((relative / body_rect.width as f32) * 100.0) as u16;
-    app.inspector_ratio = ratio.clamp(45, 85);
+    app.inspector_ratio = ratio.clamp(40, 80);
+}
+
+fn update_horizontal_divider_height(y: u16, app: &mut App) {
+    let Some(body_rect) = app.layout.body_rect else {
+        return;
+    };
+    if body_rect.height < 12 {
+        return;
+    }
+
+    let pointer = y.clamp(
+        body_rect.y.saturating_add(6),
+        body_rect.bottom().saturating_sub(6),
+    );
+    let top_height = pointer.saturating_sub(body_rect.y);
+    let inspector_height = body_rect.height.saturating_sub(top_height);
+    app.inspector_height = inspector_height.clamp(6, body_rect.height.saturating_sub(6).max(6));
 }
 
 fn build_tmux_attach_args(in_tmux: bool, session: &str) -> Vec<String> {

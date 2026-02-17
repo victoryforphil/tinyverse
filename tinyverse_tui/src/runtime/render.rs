@@ -2,11 +2,14 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, Wrap};
 
 use crate::app::{App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction, SidebarTab};
 
-use super::helpers::{anchored_rect, centered_rect, inset_rect, key_hint, line_kv, truncate_to};
+use super::helpers::{
+    ACCENT_PRIMARY, ACCENT_SECONDARY, anchored_rect, centered_rect, inset_rect, key_hint, line_kv,
+    status_pill, styled_panel, tag_pill, truncate_to,
+};
 
 const CARD_WIDTH: u16 = 34;
 const CARD_HEIGHT: u16 = 6;
@@ -62,26 +65,57 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
     app.layout.body_rect = Some(area);
 
-    if app.inspector_visible && area.width >= 90 {
-        let left_pct = app.inspector_ratio.clamp(45, 85);
+    let main_chunks = if app.inspector_visible && area.height >= 14 {
+        let inspector_height = app
+            .inspector_height
+            .clamp(6, area.height.saturating_sub(6).max(6));
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(8), Constraint::Length(inspector_height)])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(0)])
+            .split(area)
+    };
+
+    let top_area = main_chunks[0];
+    app.layout.divider_y = if app.inspector_visible && main_chunks[1].height > 0 {
+        Some(top_area.bottom())
+    } else {
+        None
+    };
+
+    if top_area.width >= 90 {
+        let left_pct = app.inspector_ratio.clamp(40, 80);
         let split = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Percentage(left_pct),
                 Constraint::Percentage(100 - left_pct),
             ])
-            .split(area);
+            .split(top_area);
         app.layout.divider_x = Some(split[0].right());
         render_cards(frame, split[0], app);
-        render_inspector(frame, split[1], app);
-        return;
+        render_sidebar(frame, split[1], app);
+    } else {
+        app.layout.divider_x = None;
+        app.layout.sidebar_tab_rects.clear();
+        app.layout.sidebar_preview_rect = None;
+        render_cards(frame, top_area, app);
     }
 
-    app.layout.divider_x = None;
-    render_cards(frame, area, app);
+    if app.inspector_visible && main_chunks[1].height > 0 {
+        render_bottom_inspector(frame, main_chunks[1], app);
+    }
 }
 
 fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
+    let panel = styled_panel("Sessions", ACCENT_SECONDARY, true);
+    let inner = inset_rect(panel.inner(area), 1, 0);
+    frame.render_widget(panel, area);
+
     if app.sessions.is_empty() {
         let empty = Paragraph::new(vec![
             Line::from("No sessions found."),
@@ -90,7 +124,7 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         .style(Style::default().fg(Color::Gray))
         .wrap(Wrap { trim: true });
 
-        let popup = centered_rect(58, 5, area);
+        let popup = centered_rect(58, 5, inner);
         frame.render_widget(
             Block::default()
                 .title(" TinyVerse ")
@@ -102,10 +136,10 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let cols = (area.width / CARD_WIDTH).max(1);
+    let cols = (inner.width / CARD_WIDTH).max(1);
     let cols_usize = cols as usize;
-    let cell_width = (area.width / cols).max(CARD_WIDTH);
-    let visible_rows = (area.height / CARD_HEIGHT).max(1) as usize;
+    let cell_width = (inner.width / cols).max(CARD_WIDTH);
+    let visible_rows = (inner.height / CARD_HEIGHT).max(1) as usize;
     let selected_row = app.selected_index / cols_usize;
 
     if selected_row < app.scroll_row {
@@ -130,16 +164,16 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
     {
         let row = (view_index as u16) / cols;
         let col = (view_index as u16) % cols;
-        let x = area.x + col * cell_width;
-        let y = area.y + row * CARD_HEIGHT;
+        let x = inner.x + col * cell_width;
+        let y = inner.y + row * CARD_HEIGHT;
 
-        if y + CARD_HEIGHT > area.bottom() {
+        if y + CARD_HEIGHT > inner.bottom() {
             break;
         }
 
         let mut width = cell_width;
-        if x + width > area.right() {
-            width = area.right().saturating_sub(x);
+        if x + width > inner.right() {
+            width = inner.right().saturating_sub(x);
         }
         if width < 12 {
             continue;
@@ -177,41 +211,36 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
 
         let inner = block.inner(card_area);
         frame.render_widget(block, card_area);
+        let card_inner = inset_rect(inner, 1, 0);
 
         let body = Paragraph::new(vec![
             line_kv("key", &truncate_to(&session.session_key, 24)),
-            line_kv("agent", &truncate_to(&session.agent_type, 20)),
             Line::from(vec![
-                Span::styled("status: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    truncate_to(&session.status_string, 20),
-                    Style::default().fg(status_color(&session.status_string)),
-                ),
+                status_pill(&session.status_string),
+                Span::raw(" "),
+                tag_pill(&truncate_to(&session.agent_type, 14)),
             ]),
             line_kv("tmux", &truncate_to(&session.tmux_session_name, 20)),
         ])
         .wrap(Wrap { trim: true });
 
-        frame.render_widget(body, inner);
+        frame.render_widget(body, card_inner);
     }
 }
 
-fn render_inspector(frame: &mut Frame, area: Rect, app: &mut App) {
-    let block = Block::default()
-        .title(format!(" {} ", app.sidebar_tab.title()))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Blue));
+fn render_sidebar(frame: &mut Frame, area: Rect, app: &mut App) {
+    let block = styled_panel(app.sidebar_tab.title(), ACCENT_PRIMARY, true);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     if let Some(session) = app.selected_session().cloned() {
-        let inspector_chunks = Layout::default()
+        let sidebar_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Length(1), Constraint::Min(3)])
             .split(inner);
 
-        app.layout.sidebar_preview_rect = Some(inspector_chunks[1]);
-        render_sidebar_tabs(frame, app, inspector_chunks[0]);
+        app.layout.sidebar_preview_rect = Some(sidebar_chunks[1]);
+        render_sidebar_tabs(frame, app, sidebar_chunks[0]);
 
         let preview = app.pane_preview_cache.get(&session.session_key).cloned();
 
@@ -238,51 +267,18 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &mut App) {
             .unwrap_or_else(|| String::from("Loading agent preview..."));
 
         match app.sidebar_tab {
-            SidebarTab::Inspector => {
-                let metadata = vec![
-                    line_kv("name", &session.session_name),
-                    line_kv("key", &session.session_key),
-                    line_kv("agent", &session.agent_type),
-                    Line::from(vec![
-                        Span::styled("status: ", Style::default().fg(Color::DarkGray)),
-                        Span::styled(
-                            session.status_string.clone(),
-                            Style::default().fg(status_color(&session.status_string)),
-                        ),
-                    ]),
-                    line_kv("tmux", &session.tmux_session_name),
-                    line_kv("console", session.console_pane_id.as_deref().unwrap_or("-")),
-                    line_kv(
-                        "agent pane",
-                        session.agent_pane_id.as_deref().unwrap_or("-"),
-                    ),
-                    line_kv(
-                        "description",
-                        session.description.as_deref().unwrap_or("(none)"),
-                    ),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "Use 1-4 or left/right to switch tabs.",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                ];
-                frame.render_widget(
-                    Paragraph::new(metadata).wrap(Wrap { trim: true }),
-                    inspector_chunks[1],
-                );
-            }
             SidebarTab::Console => {
-                let fitted = fit_preview_text(&console_preview, inspector_chunks[1]);
+                let fitted = fit_preview_text(&console_preview, sidebar_chunks[1]);
                 frame.render_widget(
                     Paragraph::new(fitted).style(Style::default().fg(Color::Gray)),
-                    inspector_chunks[1],
+                    sidebar_chunks[1],
                 );
             }
             SidebarTab::Agent => {
-                let fitted = fit_preview_text(&agent_preview, inspector_chunks[1]);
+                let fitted = fit_preview_text(&agent_preview, sidebar_chunks[1]);
                 frame.render_widget(
                     Paragraph::new(fitted).style(Style::default().fg(Color::Gray)),
-                    inspector_chunks[1],
+                    sidebar_chunks[1],
                 );
             }
             SidebarTab::Chat => {
@@ -295,13 +291,13 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &mut App) {
                     Line::from("Planned: threaded notes and prompt scratchpad."),
                     Line::from(""),
                     Line::from(Span::styled(
-                        "Switch tabs with 1-4 or left/right.",
+                        "Switch tabs with 1-3 or left/right.",
                         Style::default().fg(Color::DarkGray),
                     )),
                 ];
                 frame.render_widget(
                     Paragraph::new(placeholder).wrap(Wrap { trim: true }),
-                    inspector_chunks[1],
+                    sidebar_chunks[1],
                 );
             }
         }
@@ -318,6 +314,85 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 }
 
+fn render_bottom_inspector(frame: &mut Frame, area: Rect, app: &App) {
+    let block = styled_panel("Inspector", ACCENT_SECONDARY, true);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let Some(session) = app.selected_session() else {
+        frame.render_widget(
+            Paragraph::new("No session selected")
+                .style(Style::default().fg(Color::Gray))
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    };
+
+    let left_rows = vec![
+        Row::new(vec![
+            Cell::from("Name"),
+            Cell::from(session.session_name.as_str()),
+        ]),
+        Row::new(vec![
+            Cell::from("Key"),
+            Cell::from(session.session_key.as_str()),
+        ]),
+        Row::new(vec![
+            Cell::from("Agent"),
+            Cell::from(session.agent_type.as_str()),
+        ]),
+        Row::new(vec![
+            Cell::from("Status"),
+            Cell::from(session.status_string.as_str()).style(
+                Style::default()
+                    .fg(status_color(&session.status_string))
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+    ];
+
+    let right_rows = vec![
+        Row::new(vec![
+            Cell::from("Tmux"),
+            Cell::from(session.tmux_session_name.as_str()),
+        ]),
+        Row::new(vec![
+            Cell::from("Console Pane"),
+            Cell::from(session.console_pane_id.as_deref().unwrap_or("-")),
+        ]),
+        Row::new(vec![
+            Cell::from("Agent Pane"),
+            Cell::from(session.agent_pane_id.as_deref().unwrap_or("-")),
+        ]),
+        Row::new(vec![
+            Cell::from("Description"),
+            Cell::from(session.description.as_deref().unwrap_or("(none)")),
+        ]),
+    ];
+
+    if inner.width >= 92 {
+        let columns = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(inner);
+        let left_table = Table::new(left_rows, [Constraint::Length(12), Constraint::Min(10)])
+            .column_spacing(1)
+            .style(Style::default().fg(Color::Gray));
+        let right_table = Table::new(right_rows, [Constraint::Length(14), Constraint::Min(10)])
+            .column_spacing(1)
+            .style(Style::default().fg(Color::Gray));
+        frame.render_widget(left_table, columns[0]);
+        frame.render_widget(right_table, columns[1]);
+    } else {
+        let rows = left_rows.into_iter().chain(right_rows).collect::<Vec<_>>();
+        let table = Table::new(rows, [Constraint::Length(14), Constraint::Min(10)])
+            .column_spacing(1)
+            .style(Style::default().fg(Color::Gray));
+        frame.render_widget(table, inner);
+    }
+}
+
 fn render_sidebar_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     app.layout.sidebar_tab_rects.clear();
     let mut spans = Vec::new();
@@ -327,22 +402,28 @@ fn render_sidebar_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
             spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
             cursor_x = cursor_x.saturating_add(1);
         }
-        let style = if *tab == app.sidebar_tab {
+        let selected = *tab == app.sidebar_tab;
+        let number_style = if selected {
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
         } else {
+            Style::default().fg(Color::Cyan).bg(Color::DarkGray)
+        };
+        let label_style = if selected {
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD)
+        } else {
             Style::default().fg(Color::Gray)
         };
         let short = match tab {
-            SidebarTab::Inspector => "Insp",
             SidebarTab::Console => "Cons",
             SidebarTab::Agent => "Agent",
             SidebarTab::Chat => "Chat",
         };
-        let label = format!(" {}:{} ", tab.hotkey_index(), short);
-        let width = label.chars().count() as u16;
+        let width = (short.chars().count() + 5) as u16;
         app.layout.sidebar_tab_rects.push((
             *tab,
             Rect {
@@ -353,7 +434,11 @@ fn render_sidebar_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
             },
         ));
         cursor_x = cursor_x.saturating_add(width);
-        spans.push(Span::styled(label, style));
+        spans.push(Span::styled(
+            format!(" {} ", tab.hotkey_index()),
+            number_style,
+        ));
+        spans.push(Span::styled(format!(" {} ", short), label_style));
     }
 
     frame.render_widget(Paragraph::new(Line::from(spans)), area);

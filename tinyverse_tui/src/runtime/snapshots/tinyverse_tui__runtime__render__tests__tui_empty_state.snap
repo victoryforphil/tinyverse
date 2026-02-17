@@ -1,35 +1,35 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 778
+assertion_line: 863
 expression: snapshot
 ---
 tinyverse tui  |  0 session(s)
-                                                                    ┌ Inspector ───────────────────┐
-                                                                    │No session selected           │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-     ┌ TinyVerse ─────────────────────────────────────────────┐     │                              │
-     │No sessions found.                                      │     │                              │
-     │Run `tinyverse spawn <name>` to create one.             │     │                              │
-     │                                                        │     │                              │
-     └────────────────────────────────────────────────────────┘     │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    │                              │
-                                                                    └──────────────────────────────┘
- q  quit |  arrows/hjkl  navigate |  1-4/lr  tabs |  r  refresh |  i  inspector |  enter  actions |
+╭ Sessions ──────────────────────────────────────────────╮╭ Console ───────────────────────────────╮
+│                                                        ││No session selected                     │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│  ┌ TinyVerse ───────────────────────────────────────┐  ││                                        │
+│  │No sessions found.                                │  ││                                        │
+│  │Run `tinyverse spawn <name>` to create one.       │  ││                                        │
+│  │                                                  │  ││                                        │
+│  └──────────────────────────────────────────────────┘  ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+│                                                        ││                                        │
+╰────────────────────────────────────────────────────────╯╰────────────────────────────────────────╯
+╭ Inspector ───────────────────────────────────────────────────────────────────────────────────────╮
+│No session selected                                                                               │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+ q  quit |  arrows/hjkl  navigate |  1-3/lr  tabs |  r  refresh |  i  inspector |  enter  actions |

@@ -1,6 +1,48 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, BorderType, Borders};
+
+pub const ACCENT_PRIMARY: Color = Color::Cyan;
+pub const ACCENT_SECONDARY: Color = Color::Blue;
+pub const TEXT_DIM: Color = Color::DarkGray;
+pub const TEXT_MUTED: Color = Color::Gray;
+pub const TEXT_NORMAL: Color = Color::White;
+
+pub fn styled_panel(title: &str, accent: Color, focused: bool) -> Block<'static> {
+    let border_color = if focused { accent } else { Color::DarkGray };
+    Block::default()
+        .title(format!(" {title} "))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color))
+        .title_style(
+            Style::default()
+                .fg(TEXT_NORMAL)
+                .add_modifier(Modifier::BOLD),
+        )
+}
+
+pub fn status_pill(status: &str) -> Span<'static> {
+    let lowered = status.to_ascii_lowercase();
+    let (fg, bg) = match lowered.as_str() {
+        "active" => (Color::Black, Color::Green),
+        "stale" => (Color::Black, Color::Yellow),
+        "dead" => (Color::White, Color::Red),
+        _ => (Color::White, Color::DarkGray),
+    };
+    Span::styled(
+        format!(" {} ", lowered),
+        Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+    )
+}
+
+pub fn tag_pill(label: &str) -> Span<'static> {
+    Span::styled(
+        format!(" {} ", label),
+        Style::default().fg(Color::White).bg(Color::Blue),
+    )
+}
 
 pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let popup_width = width.min(area.width.saturating_sub(2));
@@ -55,7 +97,7 @@ pub fn inset_rect(area: Rect, horizontal: u16, vertical: u16) -> Rect {
 
 pub fn line_kv(label: &str, value: &str) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{}: ", label), Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("{}: ", label), Style::default().fg(TEXT_DIM)),
         Span::raw(value.to_owned()),
     ])
 }
@@ -64,7 +106,7 @@ pub fn key_hint(key: &str, action: &str) -> Vec<Span<'static>> {
     vec![
         Span::styled(format!("[{key}]"), Style::default().fg(Color::Cyan)),
         Span::raw(" "),
-        Span::styled(action.to_owned(), Style::default().fg(Color::Gray)),
+        Span::styled(action.to_owned(), Style::default().fg(TEXT_MUTED)),
     ]
 }
 

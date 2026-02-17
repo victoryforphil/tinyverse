@@ -59,7 +59,7 @@ impl FooterHotkeyAction {
             Self::Attach => "a",
             Self::Spawn => "s",
             Self::Kill => "x",
-            Self::SidebarTab => "1-4/lr",
+            Self::SidebarTab => "1-3/lr",
             Self::FormNextField => "tab",
             Self::FormSubmit => "enter",
             Self::FormCancel => "esc",
@@ -92,48 +92,49 @@ impl FooterHotkeyAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarTab {
-    Inspector,
     Console,
     Agent,
     Chat,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DividerDrag {
+    Vertical,
+    Horizontal,
+}
+
 impl SidebarTab {
     pub fn title(self) -> &'static str {
         match self {
-            Self::Inspector => "Inspector",
             Self::Console => "Console",
             Self::Agent => "Agent",
             Self::Chat => "Chat",
         }
     }
 
-    pub fn all() -> [Self; 4] {
-        [Self::Inspector, Self::Console, Self::Agent, Self::Chat]
+    pub fn all() -> [Self; 3] {
+        [Self::Console, Self::Agent, Self::Chat]
     }
 
     pub fn hotkey_index(self) -> usize {
         match self {
-            Self::Inspector => 1,
-            Self::Console => 2,
-            Self::Agent => 3,
-            Self::Chat => 4,
+            Self::Console => 1,
+            Self::Agent => 2,
+            Self::Chat => 3,
         }
     }
 
     pub fn next(self) -> Self {
         match self {
-            Self::Inspector => Self::Console,
             Self::Console => Self::Agent,
             Self::Agent => Self::Chat,
-            Self::Chat => Self::Inspector,
+            Self::Chat => Self::Console,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::Inspector => Self::Chat,
-            Self::Console => Self::Inspector,
+            Self::Console => Self::Chat,
             Self::Agent => Self::Console,
             Self::Chat => Self::Agent,
         }
@@ -249,6 +250,7 @@ pub struct LayoutCache {
     pub card_rects: Vec<(usize, Rect)>,
     pub body_rect: Option<Rect>,
     pub divider_x: Option<u16>,
+    pub divider_y: Option<u16>,
     pub action_menu_rect: Option<Rect>,
     pub confirm_rect: Option<Rect>,
     pub footer_rect: Option<Rect>,
@@ -264,7 +266,8 @@ pub struct App {
     pub scroll_row: usize,
     pub inspector_visible: bool,
     pub inspector_ratio: u16,
-    pub dragging_divider: bool,
+    pub inspector_height: u16,
+    pub dragging_divider: Option<DividerDrag>,
     pub mode: AppMode,
     pub action_menu_index: usize,
     pub action_menu_anchor: Option<(u16, u16)>,
@@ -287,14 +290,15 @@ impl App {
             selected_index: 0,
             scroll_row: 0,
             inspector_visible: true,
-            inspector_ratio: 68,
-            dragging_divider: false,
+            inspector_ratio: 58,
+            inspector_height: 8,
+            dragging_divider: None,
             mode: AppMode::Normal,
             action_menu_index: 0,
             action_menu_anchor: None,
             input_buffer: String::new(),
             spawn_form: SpawnForm::default(),
-            sidebar_tab: SidebarTab::Inspector,
+            sidebar_tab: SidebarTab::Console,
             pane_preview_cache: HashMap::new(),
             footer_hover_action: None,
             should_quit: false,
