@@ -1,6 +1,7 @@
 mod app;
 mod chat;
 mod chat_bridge;
+mod logger;
 mod prefs;
 mod runtime;
 mod theme;

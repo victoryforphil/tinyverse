@@ -20,12 +20,18 @@ use tinyverse_lib::SessionStore;
 
 use crate::TuiRunOptions;
 use crate::app::App;
+use crate::logger::{init_logger, log_line, log_path};
 use crate::prefs;
 use crate::theme::load_theme;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(120);
 
 pub fn run(options: TuiRunOptions) -> Result<()> {
+    init_logger();
+    if let Some(path) = log_path() {
+        log_line(&format!("log file: {}", path.display()));
+    }
+
     let mut store = SessionStore::open_default()?;
     store.reconcile_now()?;
 

@@ -9,6 +9,7 @@ use reqwest::blocking::Client;
 use serde_json::{Value, json};
 
 use crate::chat::{ChatMessage, ChatMessagePart, ChatMessageRole, ChatState};
+use crate::logger::log_line;
 
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:4096";
 const DEFAULT_SYNC_INTERVAL: Duration = Duration::from_secs(4);
@@ -44,14 +45,15 @@ pub struct DispatchOutcome {
 }
 
 #[derive(Debug, Clone)]
-struct OpencodeSession {
-    id: String,
-    title: String,
+pub struct ChatSessionSummary {
+    pub id: String,
+    pub title: String,
+    pub parent_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 struct OpencodeSnapshot {
-    sessions: Vec<OpencodeSession>,
+    sessions: Vec<ChatSessionSummary>,
     active_session_id: Option<String>,
     messages: Vec<ChatMessage>,
     models: Vec<String>,
@@ -127,7 +129,7 @@ impl OpencodeClient {
 
     fn snapshot(&self, preferred_session_id: Option<&str>) -> Result<OpencodeSnapshot> {
         let sessions = self.list_sessions()?;
-        let active_session_id = preferred_session_id
+        let mut active_session_id = preferred_session_id
             .and_then(|wanted| {
                 sessions
                     .iter()
@@ -137,8 +139,17 @@ impl OpencodeClient {
             .map(ToOwned::to_owned)
             .or_else(|| sessions.first().map(|value| value.id.clone()));
 
-        let messages = if let Some(session_id) = active_session_id.as_deref() {
-            self.list_messages(session_id)?
+        let messages = if let Some(session_id) = active_session_id.clone() {
+            match self.list_messages(&session_id) {
+                Ok(messages) => messages,
+                Err(error) => {
+                    log_line(&format!(
+                        "chat bridge session lost: {session_id}, error: {error}"
+                    ));
+                    active_session_id = None;
+                    Vec::new()
+                }
+            }
         } else {
             Vec::new()
         };
@@ -152,7 +163,7 @@ impl OpencodeClient {
         })
     }
 
-    fn create_session(&self, title: &str) -> Result<OpencodeSession> {
+    fn create_session(&self, title: &str) -> Result<ChatSessionSummary> {
         let body = json!({ "title": title });
         let value =
             self.request_json_with_fallback(Method::POST, &["/session", "/session/"], Some(body))?;
@@ -169,7 +180,11 @@ impl OpencodeClient {
             .filter(|value| !value.trim().is_empty())
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| String::from("Untitled session"));
-        Ok(OpencodeSession { id, title })
+        Ok(ChatSessionSummary {
+            id,
+            title,
+            parent_id: None,
+        })
     }
 
     fn send_prompt(&self, session_id: &str, prompt: &str, model: &str, agent: &str) -> Result<()> {
@@ -207,7 +222,7 @@ impl OpencodeClient {
         Ok(())
     }
 
-    fn list_sessions(&self) -> Result<Vec<OpencodeSession>> {
+    fn list_sessions(&self) -> Result<Vec<ChatSessionSummary>> {
         let payload =
             self.request_json_with_fallback(Method::GET, &["/session", "/session/"], None)?;
         let data = unwrap_data(payload);
@@ -231,7 +246,18 @@ impl OpencodeClient {
                     .filter(|value| !value.trim().is_empty())
                     .map(ToOwned::to_owned)
                     .unwrap_or_else(|| String::from("Untitled session"));
-                Some(OpencodeSession { id, title })
+                let parent_id = record
+                    .get("parentID")
+                    .or_else(|| record.get("parent_id"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned);
+                Some(ChatSessionSummary {
+                    id,
+                    title,
+                    parent_id,
+                })
             })
             .collect::<Vec<_>>();
 
@@ -437,6 +463,7 @@ pub struct ChatBridge {
     realtime_rx: Option<Receiver<RealtimeEvent>>,
     realtime_connected: bool,
     active_session_id: Option<String>,
+    known_sessions: Vec<ChatSessionSummary>,
     mode: ChatConnectionMode,
     mode_detail: String,
     last_sync_at: Option<Instant>,
@@ -466,6 +493,7 @@ impl ChatBridge {
             realtime_rx,
             realtime_connected: false,
             active_session_id: None,
+            known_sessions: Vec::new(),
             mode,
             mode_detail: String::from("waiting for sync"),
             last_sync_at: None,
@@ -481,6 +509,33 @@ impl ChatBridge {
             mode: self.mode,
             detail: self.mode_detail.clone(),
         }
+    }
+
+    pub fn sessions(&self) -> &[ChatSessionSummary] {
+        &self.known_sessions
+    }
+
+    pub fn active_session_id(&self) -> Option<&str> {
+        self.active_session_id.as_deref()
+    }
+
+    pub fn set_active_session(&mut self, chat: &mut ChatState, session_id: &str) -> bool {
+        let wanted = session_id.trim();
+        if wanted.is_empty() {
+            return false;
+        }
+
+        if !self
+            .known_sessions
+            .iter()
+            .any(|session| session.id == wanted)
+        {
+            return false;
+        }
+
+        self.active_session_id = Some(wanted.to_owned());
+        self.sync_now(chat);
+        true
     }
 
     pub fn sync_if_due(&mut self, chat: &mut ChatState) {
@@ -517,6 +572,7 @@ impl ChatBridge {
         let Some(opencode) = self.opencode.as_ref() else {
             self.mode = ChatConnectionMode::Offline;
             self.mode_detail = String::from("OpenCode API disabled");
+            self.known_sessions.clear();
             return;
         };
 
@@ -534,7 +590,9 @@ impl ChatBridge {
 
         match sync_result {
             Ok(snapshot) => {
+                let previous_session = self.active_session_id.clone();
                 self.active_session_id = snapshot.active_session_id;
+                self.known_sessions = snapshot.sessions.clone();
                 chat.set_models(snapshot.models);
                 chat.set_agents(snapshot.agents);
                 chat.set_messages(snapshot.messages);
@@ -550,10 +608,19 @@ impl ChatBridge {
                 } else {
                     format!("OpenCode session: {session_label}")
                 };
+
+                if previous_session != self.active_session_id {
+                    log_line(&format!(
+                        "chat bridge session switched: {:?} -> {:?}",
+                        previous_session, self.active_session_id
+                    ));
+                }
             }
             Err(error) => {
                 self.mode = ChatConnectionMode::TmuxFallback;
-                self.mode_detail = format!("OpenCode unavailable: {error}");
+                let summary = summarize_bridge_error(&error);
+                self.mode_detail = format!("OpenCode unavailable: {summary}");
+                log_line(&format!("chat bridge sync error: {error:#}"));
             }
         }
     }
@@ -593,10 +660,17 @@ impl ChatBridge {
             }
             Err(error) => {
                 self.mode = ChatConnectionMode::TmuxFallback;
-                self.mode_detail = format!("OpenCode send failed: {error}");
+                if is_session_missing_error(&error) {
+                    self.active_session_id = None;
+                    self.pending_realtime_refresh = true;
+                    self.last_sync_at = None;
+                }
+                let summary = summarize_bridge_error(&error);
+                self.mode_detail = format!("OpenCode send failed: {summary}");
+                log_line(&format!("chat bridge send error: {error:#}"));
                 DispatchOutcome {
                     via_opencode: false,
-                    detail: format!("OpenCode send failed ({error}); using tmux fallback"),
+                    detail: format!("OpenCode send failed ({summary}); using tmux fallback"),
                 }
             }
         }
@@ -608,16 +682,19 @@ fn spawn_realtime_worker(opencode: &OpencodeClient) -> Receiver<RealtimeEvent> {
     let client = opencode.clone();
 
     thread::spawn(move || {
+        let mut backoff = Duration::from_secs(2);
         loop {
             match stream_realtime_once(&client, &tx) {
                 Ok(()) => {
                     let _ = tx.send(RealtimeEvent::Disconnected);
+                    backoff = Duration::from_secs(2);
                 }
                 Err(error) => {
                     let _ = tx.send(RealtimeEvent::Error(error.to_string()));
                 }
             }
-            thread::sleep(Duration::from_secs(2));
+            thread::sleep(backoff);
+            backoff = (backoff * 2).min(Duration::from_secs(30));
         }
     });
 
@@ -731,13 +808,21 @@ impl ChatBridge {
             match rx.try_recv() {
                 Ok(RealtimeEvent::Connected) => {
                     self.realtime_connected = true;
+                    log_line("chat bridge realtime connected");
                 }
                 Ok(RealtimeEvent::Disconnected) => {
                     self.realtime_connected = false;
+                    self.pending_realtime_refresh = true;
+                    log_line("chat bridge realtime disconnected");
                 }
                 Ok(RealtimeEvent::Error(error)) => {
+                    let was_connected = self.realtime_connected;
                     self.realtime_connected = false;
-                    self.mode_detail = format!("OpenCode realtime error: {error}");
+                    if was_connected {
+                        self.mode_detail =
+                            format!("OpenCode realtime error: {}", truncate_error_label(&error));
+                        log_line(&format!("chat bridge realtime error: {error}"));
+                    }
                 }
                 Ok(RealtimeEvent::Update {
                     event_type,
@@ -840,6 +925,41 @@ fn normalize_path(path: &str) -> String {
     } else {
         format!("/{path}")
     }
+}
+
+fn is_session_missing_error(error: &anyhow::Error) -> bool {
+    let message = format!("{error:#}").to_ascii_lowercase();
+    (message.contains("404") || message.contains("not found")) && message.contains("session")
+}
+
+fn summarize_bridge_error(error: &anyhow::Error) -> String {
+    let root = error.root_cause().to_string();
+    let lower = root.to_ascii_lowercase();
+    if lower.contains("refused") || lower.contains("connect") {
+        return String::from("server unreachable");
+    }
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return String::from("request timed out");
+    }
+    if lower.contains("404") || lower.contains("not found") {
+        return String::from("endpoint not found");
+    }
+
+    truncate_error_label(&root)
+}
+
+fn truncate_error_label(value: &str) -> String {
+    let trimmed = value.trim();
+    let max = 48usize;
+    if trimmed.chars().count() <= max {
+        return trimmed.to_owned();
+    }
+    let mut output = String::new();
+    for ch in trimmed.chars().take(max.saturating_sub(1)) {
+        output.push(ch);
+    }
+    output.push('…');
+    output
 }
 
 fn parse_model_selector(value: &str) -> Option<(String, String)> {
