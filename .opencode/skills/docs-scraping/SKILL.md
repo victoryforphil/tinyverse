@@ -8,6 +8,7 @@ description: Add or refresh external documentation snapshots from user requests 
 - Turn a user docs scraping request into a reusable script and generated docs snapshot output.
 - Standardize output under `docs/external/<source>/` with one page-level `.ext.md` file per discovered page.
 - Ensure each generated page has a metadata header and notes footer, and create an `index.ext.md` manifest.
+- Prefer routing implementation through the dedicated `scraper` subagent.
 
 ## Accepted request patterns
 

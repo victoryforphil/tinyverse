@@ -5,3 +5,7 @@ dist/
 build/
 .env
 .opencode/node_modules/
+
+target/
+
+.proto/

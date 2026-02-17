@@ -37,6 +37,7 @@ Current state:
 Operational commands:
 - Dispatch scraper: `scripts/scrapes/scrape_docs.sh.ts <source> [output_dir]`
 - Run scraper directly: `scripts/scrapes/scrape_<source>_docs.sh.ts [output_dir]`
+- Docs.rs scraper: `scripts/scrapes/scrape_docs.sh.ts docsrs [docs_rs_url] [output_dir]`
 
 Single-test note:
 - When tests are added, document exact single-file and single-test-by-name commands here.

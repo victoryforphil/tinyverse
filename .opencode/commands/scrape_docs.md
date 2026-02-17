@@ -1,9 +1,10 @@
 ---
 description: Add or refresh external docs snapshots from a user request
-agent: build
+agent: scraper
 ---
 
 Use the `docs-scraping` skill from `.opencode/skills/docs-scraping/SKILL.md`.
+Use the `scrape-routing` skill from `.opencode/skills/scrape-routing/SKILL.md`.
 
 Goal:
 
