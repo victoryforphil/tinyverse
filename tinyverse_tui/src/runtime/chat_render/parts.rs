@@ -4,13 +4,9 @@ use serde_json::Value;
 
 use crate::app::App;
 use crate::chat::ChatMessagePart;
+use tinyverse_tui_components::compact_text as truncate_to;
 
 use super::types::RenderedChatLine;
-use crate::runtime::helpers::truncate_to;
-
-const EXPANDED_LINE_CAP: usize = 120;
-const TRUNCATED_HINT: &str = "    ... (press enter for full detail)";
-const TODO_RENDER_CAP: usize = 24;
 
 #[derive(Debug, Clone)]
 struct TodoRenderItem {
@@ -19,20 +15,162 @@ struct TodoRenderItem {
     priority: String,
 }
 
+// ── apply_patch support ────────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PatchOp {
+    Add,
+    Update,
+    Delete,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PatchFileEntry {
+    pub(super) op: PatchOp,
+    pub(super) path: String,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct PatchSummary {
+    pub(super) files: Vec<PatchFileEntry>,
+}
+
+impl PatchSummary {
+    pub(super) fn count(&self, op: PatchOp) -> usize {
+        self.files.iter().filter(|f| f.op == op).count()
+    }
+
+    fn compact_label(&self) -> String {
+        let adds = self.count(PatchOp::Add);
+        let updates = self.count(PatchOp::Update);
+        let deletes = self.count(PatchOp::Delete);
+        let total = self.files.len();
+
+        let mut parts: Vec<String> = Vec::new();
+        if adds > 0 {
+            parts.push(format!("+{adds}"));
+        }
+        if updates > 0 {
+            parts.push(format!("~{updates}"));
+        }
+        if deletes > 0 {
+            parts.push(format!("-{deletes}"));
+        }
+
+        let ops = if parts.is_empty() {
+            String::from("0 files")
+        } else {
+            parts.join(" ")
+        };
+
+        // Show first file basename as hint when ≤3 files
+        let hint = if total == 1 {
+            let basename = self.files[0]
+                .path
+                .rsplit('/')
+                .next()
+                .unwrap_or(&self.files[0].path);
+            format!(" {basename}")
+        } else if total <= 3 {
+            let names: Vec<&str> = self
+                .files
+                .iter()
+                .map(|f| f.path.rsplit('/').next().unwrap_or(&f.path))
+                .collect();
+            format!(" {}", names.join(", "))
+        } else {
+            format!(" ({total} files)")
+        };
+
+        format!("{ops}{hint}")
+    }
+}
+
+/// Parse patch text from `apply_patch` tool input.
+///
+/// Looks for `*** <Op> File: <path>` header lines in the patch body.
+/// Accepts the raw input string which may be JSON containing `"patchText"` or
+/// direct patch text.
+pub(super) fn parse_patch_summary(raw: &str) -> Option<PatchSummary> {
+    // Try to extract patchText from JSON wrapper first.
+    let owned_patch;
+    let patch_body = if let Some(extracted) = extract_patch_text_from_json(raw) {
+        owned_patch = extracted;
+        owned_patch.as_str()
+    } else {
+        raw
+    };
+
+    let mut files = Vec::new();
+    for line in patch_body.lines() {
+        let trimmed = line.trim();
+        if let Some(path) = trimmed.strip_prefix("*** Add File: ") {
+            files.push(PatchFileEntry {
+                op: PatchOp::Add,
+                path: path.trim().to_owned(),
+            });
+        } else if let Some(path) = trimmed.strip_prefix("*** Update File: ") {
+            files.push(PatchFileEntry {
+                op: PatchOp::Update,
+                path: path.trim().to_owned(),
+            });
+        } else if let Some(path) = trimmed.strip_prefix("*** Delete File: ") {
+            files.push(PatchFileEntry {
+                op: PatchOp::Delete,
+                path: path.trim().to_owned(),
+            });
+        }
+    }
+
+    if files.is_empty() {
+        return None;
+    }
+
+    Some(PatchSummary { files })
+}
+
+pub(super) fn extract_patch_text(raw: &str) -> Option<String> {
+    if let Some(extracted) = extract_patch_text_from_json(raw) {
+        return Some(extracted);
+    }
+
+    if raw.contains("*** Begin Patch") || raw.contains("@@") {
+        return Some(raw.to_owned());
+    }
+
+    None
+}
+
+fn extract_patch_text_from_json(raw: &str) -> Option<String> {
+    // Fast check: skip full parse if no patchText key present.
+    if !raw.contains("\"patchText\"") {
+        return None;
+    }
+    let parsed = serde_json::from_str::<Value>(raw).ok()?;
+    parsed
+        .get("patchText")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
 fn collapsible_header(
     label: &str,
     kind_tag: &str,
-    expanded: bool,
     fg: Color,
     width: u16,
     is_focused: bool,
     part_key: Option<String>,
     app: &App,
 ) -> RenderedChatLine {
-    let chevron = if expanded { "▼" } else { "▶" };
-    let left = format!("  {chevron} {label}");
+    let icon = "◆";
+    let hint = if is_focused {
+        "  enter/click popup"
+    } else {
+        ""
+    };
+    let left = format!("  {icon} {label}");
     let tag = format!(" {kind_tag} ");
-    let used = left.chars().count() + tag.chars().count();
+    let used = left.chars().count() + hint.chars().count() + tag.chars().count();
     let spacer = " ".repeat((width as usize).saturating_sub(used).max(1));
 
     let bg = if is_focused {
@@ -41,21 +179,32 @@ fn collapsible_header(
         app.theme.chat_collapsible_bg
     };
 
+    let mut spans = vec![Span::styled(
+        left,
+        Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+    )];
+
+    if !hint.is_empty() {
+        spans.push(Span::styled(
+            hint.to_owned(),
+            Style::default()
+                .fg(app.theme.text_muted)
+                .bg(bg)
+                .add_modifier(Modifier::ITALIC),
+        ));
+    }
+
+    spans.push(Span::styled(spacer, Style::default().bg(bg)));
+    spans.push(Span::styled(
+        tag,
+        Style::default()
+            .fg(fg)
+            .bg(app.theme.chat_collapsible_tag_bg)
+            .add_modifier(Modifier::BOLD),
+    ));
+
     RenderedChatLine {
-        line: Line::from(vec![
-            Span::styled(
-                left,
-                Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(spacer, Style::default().bg(bg)),
-            Span::styled(
-                tag,
-                Style::default()
-                    .fg(fg)
-                    .bg(app.theme.chat_collapsible_tag_bg)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        line: Line::from(spans),
         toggle_key: part_key,
     }
 }
@@ -65,135 +214,117 @@ pub(super) fn render_chat_part_lines(
     app: &App,
     width: u16,
     part_key: Option<String>,
-    expanded: bool,
 ) -> Vec<RenderedChatLine> {
     let max = width.saturating_sub(8) as usize;
+    let is_focused = is_focused_part(app, part_key.as_deref());
     match part {
         ChatMessagePart::Text(value) => {
             if is_hidden_noise_line(value) {
                 return Vec::new();
             }
 
+            let style = Style::default().fg(app.theme.text_secondary);
             value
                 .lines()
-                .map(|line| RenderedChatLine {
-                    line: line_with_path_pills(
-                        &format!("  {line}"),
-                        Style::default().fg(app.theme.text_secondary),
-                        app,
-                    ),
-                    toggle_key: None,
+                .map(|line| {
+                    let mut prefixed = String::with_capacity(line.len() + 2);
+                    prefixed.push_str("  ");
+                    prefixed.push_str(line);
+                    RenderedChatLine {
+                        line: line_with_path_pills(&prefixed, style, app),
+                        toggle_key: part_key
+                            .clone()
+                            .filter(|_| line_contains_highlightable_path(line)),
+                    }
                 })
                 .collect()
         }
-        ChatMessagePart::Markdown(value) => value
-            .lines()
-            .enumerate()
-            .map(|(index, line)| {
-                let trimmed = line.trim_start();
-                let style = if trimmed.starts_with('#') {
-                    Style::default()
-                        .fg(app.theme.text_primary)
-                        .add_modifier(Modifier::BOLD)
-                } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-                    Style::default().fg(app.theme.text_secondary)
-                } else {
-                    Style::default().fg(app.theme.text_secondary)
-                };
-
-                RenderedChatLine {
-                    line: line_with_path_pills(&format!("  {line}"), style, app),
-                    toggle_key: if index == 0 && part_key.is_some() && part.is_collapsible() {
-                        part_key.clone()
+        ChatMessagePart::Markdown(value) => {
+            let first_key = if part_key.is_some() && part.is_collapsible() {
+                part_key.clone()
+            } else {
+                None
+            };
+            let base_style = Style::default().fg(app.theme.text_secondary);
+            let heading_style = Style::default()
+                .fg(app.theme.text_primary)
+                .add_modifier(Modifier::BOLD);
+            value
+                .lines()
+                .enumerate()
+                .map(|(index, line)| {
+                    let trimmed = line.trim_start();
+                    let style = if trimmed.starts_with('#') {
+                        heading_style
                     } else {
-                        None
-                    },
-                }
-            })
-            .collect(),
+                        base_style
+                    };
+
+                    let mut prefixed = String::with_capacity(line.len() + 2);
+                    prefixed.push_str("  ");
+                    prefixed.push_str(line);
+                    RenderedChatLine {
+                        line: line_with_path_pills(&prefixed, style, app),
+                        toggle_key: part_key
+                            .clone()
+                            .filter(|_| line_contains_highlightable_path(line))
+                            .or_else(|| if index == 0 { first_key.clone() } else { None }),
+                    }
+                })
+                .collect()
+        }
         ChatMessagePart::Thinking(value) => {
-            let mut out = vec![collapsible_header(
+            let mut out = Vec::with_capacity(2);
+            out.push(collapsible_header(
                 "Reasoning",
                 "thinking",
-                expanded,
                 app.theme.pill_muted_fg,
                 width,
-                is_focused_part(app, part_key.as_deref()),
+                is_focused,
                 part_key.clone(),
                 app,
-            )];
+            ));
 
-            if !expanded {
-                let preview = value.lines().next().unwrap_or("(no detail)");
-                out.push(RenderedChatLine {
-                    line: line_with_path_pills(
-                        &format!("    {}", truncate_to(preview, max)),
-                        Style::default().fg(app.theme.text_muted),
-                        app,
-                    ),
-                    toggle_key: None,
-                });
-                return out;
-            }
-
-            let mut count = 0usize;
-            for line in value.lines() {
-                if count >= EXPANDED_LINE_CAP {
-                    out.push(truncated_hint_line(app));
-                    break;
-                }
-                out.push(RenderedChatLine {
-                    line: line_with_path_pills(
-                        &format!("    {line}"),
-                        Style::default().fg(app.theme.text_muted),
-                        app,
-                    ),
-                    toggle_key: None,
-                });
-                count += 1;
-            }
+            let preview = value.lines().next().unwrap_or("(no detail)");
+            let mut preview_text = String::with_capacity(preview.len() + 4);
+            preview_text.push_str("    ");
+            preview_text.push_str(&truncate_to(preview, max));
+            out.push(RenderedChatLine {
+                line: line_with_path_pills(
+                    &preview_text,
+                    Style::default().fg(app.theme.text_muted),
+                    app,
+                ),
+                toggle_key: part_key
+                    .clone()
+                    .filter(|_| line_contains_highlightable_path(preview)),
+            });
             out
         }
         ChatMessagePart::Code { language, code } => {
             let label = language.as_deref().unwrap_or("text");
-            let mut out = vec![collapsible_header(
+            let mut out = Vec::with_capacity(2);
+            out.push(collapsible_header(
                 &format!("code ({label})"),
                 "code",
-                expanded,
                 app.theme.pill_accent_fg,
                 width,
-                is_focused_part(app, part_key.as_deref()),
+                is_focused,
                 part_key.clone(),
                 app,
-            )];
+            ));
 
-            if !expanded {
-                let preview = code.lines().next().unwrap_or("(empty)");
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(
-                        format!("    {}", truncate_to(preview, max)),
-                        Style::default().fg(app.theme.text_muted),
-                    )),
-                    toggle_key: None,
-                });
-                return out;
-            }
-
-            let mut count = 0usize;
-            for line in code.lines() {
-                if count >= EXPANDED_LINE_CAP {
-                    out.push(truncated_hint_line(app));
-                    break;
-                }
-                out.push(RenderedChatLine {
-                    line: Line::from(vec![
-                        Span::styled("    │ ", Style::default().fg(app.theme.chat_separator_fg)),
-                        Span::styled(line.to_owned(), Style::default().fg(app.theme.text_primary)),
-                    ]),
-                    toggle_key: None,
-                });
-                count += 1;
-            }
+            let preview = code.lines().next().unwrap_or("(empty)");
+            let mut preview_text = String::with_capacity(preview.len() + 4);
+            preview_text.push_str("    ");
+            preview_text.push_str(&truncate_to(preview, max));
+            out.push(RenderedChatLine {
+                line: Line::from(Span::styled(
+                    preview_text,
+                    Style::default().fg(app.theme.text_muted),
+                )),
+                toggle_key: None,
+            });
             out
         }
         ChatMessagePart::ToolCall {
@@ -202,278 +333,120 @@ pub(super) fn render_chat_part_lines(
             output,
         } => {
             let is_todo_tool = name.eq_ignore_ascii_case("todowrite");
+            let is_patch_tool = name.eq_ignore_ascii_case("apply_patch");
             let header_label = if is_todo_tool {
                 String::from("todo list update")
+            } else if is_patch_tool {
+                String::from("patch")
             } else {
                 format!("tool {name}")
             };
-            let header_tag = if is_todo_tool { "todo" } else { "tool" };
+            let header_tag = if is_todo_tool {
+                "todo"
+            } else if is_patch_tool {
+                "patch"
+            } else {
+                "tool"
+            };
 
-            let mut out = vec![collapsible_header(
+            let mut out = Vec::with_capacity(2);
+            out.push(collapsible_header(
                 &header_label,
                 header_tag,
-                expanded,
                 app.theme.pill_info_fg,
                 width,
-                is_focused_part(app, part_key.as_deref()),
+                is_focused,
                 part_key.clone(),
-                app,
-            )];
-
-            if !expanded {
-                let preview = if is_todo_tool {
-                    output
-                        .as_deref()
-                        .and_then(parse_todo_items)
-                        .or_else(|| input.as_deref().and_then(parse_todo_items))
-                        .map(|todos| todo_preview_label(&todos))
-                        .or_else(|| input.as_deref().and_then(first_meaningful_line).map(str::to_owned))
-                        .or_else(|| output.as_deref().and_then(first_meaningful_line).map(str::to_owned))
-                        .unwrap_or_else(|| String::from("todo state update"))
-                } else {
-                    input
-                        .as_deref()
-                        .and_then(first_meaningful_line)
-                        .or_else(|| output.as_deref().and_then(first_meaningful_line))
-                        .unwrap_or("(details)")
-                        .to_owned()
-                };
-                out.push(RenderedChatLine {
-                    line: line_with_path_pills(
-                        &format!("    {}", truncate_to(&preview, max)),
-                        Style::default().fg(app.theme.text_muted),
-                        app,
-                    ),
-                    toggle_key: None,
-                });
-                return out;
-            }
-
-            if is_todo_tool {
-                if let Some(input) = input {
-                    out.push(RenderedChatLine {
-                        line: Line::from(vec![
-                            Span::styled(
-                                " IN ",
-                                Style::default()
-                                    .fg(app.theme.pill_muted_fg)
-                                    .bg(app.theme.pill_muted_bg)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(" ", Style::default()),
-                        ]),
-                        toggle_key: None,
-                    });
-
-                    if let Some(items) = parse_todo_items(input) {
-                        out.extend(render_todo_items(&items, max, app));
-                    } else {
-                        let mut count = 0usize;
-                        for line in input.lines() {
-                            if count >= EXPANDED_LINE_CAP / 2 {
-                                out.push(truncated_hint_line(app));
-                                break;
-                            }
-                            out.push(RenderedChatLine {
-                                line: line_with_path_pills(
-                                    &format!("      {}", truncate_to(line, max)),
-                                    Style::default().fg(app.theme.text_muted),
-                                    app,
-                                ),
-                                toggle_key: None,
-                            });
-                            count += 1;
-                        }
-                    }
-                }
-
-                if let Some(output) = output {
-                    out.push(RenderedChatLine {
-                        line: Line::from(vec![
-                            Span::styled(
-                                " OUT ",
-                                Style::default()
-                                    .fg(app.theme.pill_muted_fg)
-                                    .bg(app.theme.pill_muted_bg)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(" ", Style::default()),
-                        ]),
-                        toggle_key: None,
-                    });
-
-                    if let Some(items) = parse_todo_items(output) {
-                        out.extend(render_todo_items(&items, max, app));
-                    } else {
-                        let mut count = 0usize;
-                        for line in output.lines() {
-                            if count >= EXPANDED_LINE_CAP {
-                                out.push(truncated_hint_line(app));
-                                break;
-                            }
-                            out.push(RenderedChatLine {
-                                line: line_with_path_pills(
-                                    &format!("      {}", truncate_to(line, max)),
-                                    Style::default().fg(app.theme.text_secondary),
-                                    app,
-                                ),
-                                toggle_key: None,
-                            });
-                            count += 1;
-                        }
-                    }
-                }
-                return out;
-            }
-
-            if let Some(input) = input {
-                out.push(RenderedChatLine {
-                    line: Line::from(vec![
-                        Span::styled(
-                            " IN ",
-                            Style::default()
-                                .fg(app.theme.pill_muted_fg)
-                                .bg(app.theme.pill_muted_bg)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(" ", Style::default()),
-                    ]),
-                    toggle_key: None,
-                });
-
-                let mut count = 0usize;
-                for line in input.lines() {
-                    if count >= EXPANDED_LINE_CAP / 2 {
-                        out.push(truncated_hint_line(app));
-                        break;
-                    }
-                    out.push(RenderedChatLine {
-                        line: line_with_path_pills(
-                            &format!("      {}", truncate_to(line, max)),
-                            Style::default().fg(app.theme.text_muted),
-                            app,
-                        ),
-                        toggle_key: None,
-                    });
-                    count += 1;
-                }
-            }
-
-            if let Some(output) = output {
-                out.push(RenderedChatLine {
-                    line: Line::from(vec![
-                        Span::styled(
-                            " OUT ",
-                            Style::default()
-                                .fg(app.theme.pill_muted_fg)
-                                .bg(app.theme.pill_muted_bg)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(" ", Style::default()),
-                    ]),
-                    toggle_key: None,
-                });
-
-                let mut count = 0usize;
-                for line in output.lines() {
-                    if count >= EXPANDED_LINE_CAP {
-                        out.push(truncated_hint_line(app));
-                        break;
-                    }
-                    out.push(RenderedChatLine {
-                        line: line_with_path_pills(
-                            &format!("      {}", truncate_to(line, max)),
-                            Style::default().fg(app.theme.text_secondary),
-                            app,
-                        ),
-                        toggle_key: None,
-                    });
-                    count += 1;
-                }
-            }
-            out
-        }
-        ChatMessagePart::ShellCommand(value) => {
-            let mut spans = vec![
-                Span::styled(
-                    " CMD ",
-                    Style::default()
-                        .fg(app.theme.pill_info_fg)
-                        .bg(app.theme.pill_info_bg)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::raw(" "),
-                Span::styled("$ ", Style::default().fg(app.theme.pill_info_fg)),
-            ];
-            spans.extend(spans_with_path_pills(
-                &truncate_to(value, max),
-                Style::default().fg(app.theme.text_primary),
                 app,
             ));
 
+            let preview = if is_todo_tool {
+                output
+                    .as_deref()
+                    .and_then(parse_todo_items)
+                    .or_else(|| input.as_deref().and_then(parse_todo_items))
+                    .map(|todos| todo_preview_label(&todos))
+                    .or_else(|| {
+                        input
+                            .as_deref()
+                            .and_then(first_meaningful_line)
+                            .map(str::to_owned)
+                    })
+                    .or_else(|| {
+                        output
+                            .as_deref()
+                            .and_then(first_meaningful_line)
+                            .map(str::to_owned)
+                    })
+                    .unwrap_or_else(|| String::from("todo state update"))
+            } else if is_patch_tool {
+                input
+                    .as_deref()
+                    .and_then(parse_patch_summary)
+                    .map(|s| s.compact_label())
+                    .unwrap_or_else(|| String::from("apply patch"))
+            } else {
+                input
+                    .as_deref()
+                    .and_then(first_meaningful_line)
+                    .or_else(|| output.as_deref().and_then(first_meaningful_line))
+                    .unwrap_or("(details)")
+                    .to_owned()
+            };
+            let mut preview_text = String::with_capacity(preview.len() + 4);
+            preview_text.push_str("    ");
+            preview_text.push_str(&truncate_to(&preview, max));
+            out.push(RenderedChatLine {
+                line: line_with_path_pills(
+                    &preview_text,
+                    Style::default().fg(app.theme.text_muted),
+                    app,
+                ),
+                toggle_key: part_key
+                    .clone()
+                    .filter(|_| line_contains_highlightable_path(&preview)),
+            });
+            out
+        }
+        ChatMessagePart::ShellCommand(value) => {
+            let command = truncate_to(value, max);
+            let spans = command_spans(&command, app);
+
             vec![RenderedChatLine {
                 line: Line::from(spans),
-                toggle_key: None,
+                toggle_key: part_key
+                    .clone()
+                    .filter(|_| line_contains_highlightable_path(value)),
             }]
         }
         ChatMessagePart::ShellOutput { output, exit_code } => {
-            let mut out = vec![collapsible_header(
+            let mut out = Vec::with_capacity(2);
+            out.push(collapsible_header(
                 "shell output",
                 "shell",
-                expanded,
                 app.theme.text_muted,
                 width,
-                is_focused_part(app, part_key.as_deref()),
-                part_key,
+                is_focused,
+                part_key.clone(),
                 app,
-            )];
+            ));
 
-            if !expanded {
-                let preview = output.lines().next().unwrap_or("(empty)");
-                let suffix = exit_code
-                    .map(|code| format!("  exit {code}"))
-                    .unwrap_or_default();
-                out.push(RenderedChatLine {
-                    line: line_with_path_pills(
-                        &format!("    {}{}", truncate_to(preview, max), suffix),
-                        Style::default().fg(app.theme.text_muted),
-                        app,
-                    ),
-                    toggle_key: None,
-                });
-                return out;
-            }
-
-            let mut count = 0usize;
-            for line in output.lines() {
-                if count >= EXPANDED_LINE_CAP {
-                    out.push(truncated_hint_line(app));
-                    break;
-                }
-                out.push(RenderedChatLine {
-                    line: line_with_path_pills(
-                        &format!("    │ {}", truncate_to(line, max)),
-                        Style::default().fg(app.theme.text_muted),
-                        app,
-                    ),
-                    toggle_key: None,
-                });
-                count += 1;
-            }
-
-            if let Some(code) = exit_code {
-                let style = if *code == 0 {
-                    Style::default().fg(app.theme.pill_ok_fg)
-                } else {
-                    Style::default()
-                        .fg(app.theme.pill_err_fg)
-                        .add_modifier(Modifier::BOLD)
-                };
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(format!("    exit {code}"), style)),
-                    toggle_key: None,
-                });
-            }
+            let preview = output.lines().next().unwrap_or("(empty)");
+            let suffix = exit_code
+                .map(|code| format!("  exit {code}"))
+                .unwrap_or_default();
+            let mut preview_text = String::with_capacity(preview.len() + suffix.len() + 4);
+            preview_text.push_str("    ");
+            preview_text.push_str(&truncate_to(preview, max));
+            preview_text.push_str(&suffix);
+            out.push(RenderedChatLine {
+                line: line_with_path_pills(
+                    &preview_text,
+                    Style::default().fg(app.theme.text_muted),
+                    app,
+                ),
+                toggle_key: None,
+            });
             out
         }
         ChatMessagePart::Error(value) => vec![RenderedChatLine {
@@ -496,18 +469,6 @@ pub(super) fn render_chat_part_lines(
     }
 }
 
-fn truncated_hint_line(app: &App) -> RenderedChatLine {
-    RenderedChatLine {
-        line: Line::from(Span::styled(
-            TRUNCATED_HINT,
-            Style::default()
-                .fg(app.theme.pill_muted_fg)
-                .add_modifier(Modifier::ITALIC),
-        )),
-        toggle_key: None,
-    }
-}
-
 fn is_focused_part(app: &App, part_key: Option<&str>) -> bool {
     part_key.is_some_and(|key| app.chat.focused_part_key() == Some(key))
 }
@@ -517,24 +478,30 @@ fn line_with_path_pills(raw: &str, base_style: Style, app: &App) -> Line<'static
 }
 
 fn spans_with_path_pills(raw: &str, base_style: Style, app: &App) -> Vec<Span<'static>> {
+    // Fast path: if the line has no '/' or common path indicators, skip path detection entirely.
+    if !raw.contains('/') && !raw.contains("\"filePath\"") && !raw.contains("\"path\"") {
+        return vec![Span::styled(raw.to_owned(), base_style)];
+    }
+
     if let Some((prefix, path, suffix)) = extract_json_filepath(raw) {
         let display = display_path(&path, app);
-        let mut spans = Vec::new();
+        let path_style = Style::default()
+            .fg(app.theme.path_pill_fg)
+            .add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
+        let mut spans = Vec::with_capacity(3);
         if !prefix.is_empty() {
             spans.push(Span::styled(prefix, base_style));
         }
-        spans.push(Span::styled(
-            format!(" {display} "),
-            Style::default()
-                .fg(app.theme.path_pill_fg)
-                .bg(app.theme.path_pill_bg)
-                .add_modifier(Modifier::BOLD),
-        ));
+        spans.push(Span::styled(display, path_style));
         if !suffix.is_empty() {
             spans.push(Span::styled(suffix, base_style));
         }
         return spans;
     }
+
+    let path_style = Style::default()
+        .fg(app.theme.path_pill_fg)
+        .add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
     for chunk in raw.split_inclusive(' ') {
@@ -553,13 +520,7 @@ fn spans_with_path_pills(raw: &str, base_style: Style, app: &App) -> Vec<Span<'s
             if !leading.is_empty() {
                 spans.push(Span::styled(leading.to_owned(), base_style));
             }
-            spans.push(Span::styled(
-                format!(" {} ", display_path(core, app)),
-                Style::default()
-                    .fg(app.theme.path_pill_fg)
-                    .bg(app.theme.path_pill_bg)
-                    .add_modifier(Modifier::BOLD),
-            ));
+            spans.push(Span::styled(display_path(core, app), path_style));
             if !trailing.is_empty() {
                 spans.push(Span::styled(trailing.to_owned(), base_style));
             }
@@ -574,6 +535,67 @@ fn spans_with_path_pills(raw: &str, base_style: Style, app: &App) -> Vec<Span<'s
 
     if spans.is_empty() {
         spans.push(Span::styled(raw.to_owned(), base_style));
+    }
+    spans
+}
+
+fn line_contains_highlightable_path(raw: &str) -> bool {
+    extract_json_filepath(raw).is_some()
+        || raw.split_whitespace().any(|token| {
+            let (_, core, _) = split_token_edges(token);
+            is_path_like(core)
+        })
+}
+
+fn command_spans(command: &str, app: &App) -> Vec<Span<'static>> {
+    let bg = app.theme.chat_code_bg;
+    let base = Style::default().fg(app.theme.text_primary).bg(bg);
+    let command_style = Style::default()
+        .fg(app.theme.pill_info_fg)
+        .bg(bg)
+        .add_modifier(Modifier::BOLD);
+    let flag_style = Style::default().fg(app.theme.text_secondary).bg(bg);
+    let path_style = Style::default()
+        .fg(app.theme.path_pill_fg)
+        .bg(bg)
+        .add_modifier(Modifier::UNDERLINED | Modifier::BOLD);
+
+    let mut spans = Vec::new();
+    let mut first_token = true;
+    for chunk in command.split_inclusive(' ') {
+        let token = chunk.trim_end_matches(' ');
+        let trailing_spaces = &chunk[token.len()..];
+
+        if !token.is_empty() {
+            let (leading, core, trailing) = split_token_edges(token);
+            if !leading.is_empty() {
+                spans.push(Span::styled(leading.to_owned(), base));
+            }
+
+            let style = if first_token {
+                command_style
+            } else if is_path_like(core) {
+                path_style
+            } else if core.starts_with('-') {
+                flag_style
+            } else {
+                base
+            };
+            spans.push(Span::styled(core.to_owned(), style));
+
+            if !trailing.is_empty() {
+                spans.push(Span::styled(trailing.to_owned(), base));
+            }
+            first_token = false;
+        }
+
+        if !trailing_spaces.is_empty() {
+            spans.push(Span::styled(trailing_spaces.to_owned(), base));
+        }
+    }
+
+    if spans.is_empty() {
+        spans.push(Span::styled(command.to_owned(), base));
     }
     spans
 }
@@ -736,6 +758,12 @@ fn parse_todo_items(raw: &str) -> Option<Vec<TodoRenderItem>> {
 
 fn todo_preview_label(items: &[TodoRenderItem]) -> String {
     let total = items.len();
+    if total == 1 {
+        let label = truncate_to(items[0].content.trim(), 32);
+        let status = items[0].status.as_str();
+        return format!("1 todo ({status}: {label})");
+    }
+
     let completed = items
         .iter()
         .filter(|item| item.status.eq_ignore_ascii_case("completed"))
@@ -744,138 +772,23 @@ fn todo_preview_label(items: &[TodoRenderItem]) -> String {
         .iter()
         .filter(|item| item.status.eq_ignore_ascii_case("in_progress"))
         .count();
+    let high_priority = items
+        .iter()
+        .filter(|item| item.priority.eq_ignore_ascii_case("high"))
+        .count();
+    let priority_suffix = if high_priority > 0 {
+        format!(", {high_priority} high")
+    } else {
+        String::new()
+    };
 
     if completed == total {
-        return format!("{total} todos completed");
+        return format!("{total} todos completed{priority_suffix}");
     }
     if in_progress > 0 {
-        return format!("{total} todos ({completed} done, {in_progress} active)");
+        return format!("{total} todos ({completed} done, {in_progress} active{priority_suffix})");
     }
-    format!("{total} todos ({completed} done)")
-}
-
-fn render_todo_items(items: &[TodoRenderItem], max: usize, app: &App) -> Vec<RenderedChatLine> {
-    let mut out = Vec::new();
-    out.push(RenderedChatLine {
-        line: Line::from(Span::styled(
-            format!("      {}", todo_preview_label(items)),
-            Style::default().fg(app.theme.text_muted),
-        )),
-        toggle_key: None,
-    });
-
-    for item in items.iter().take(TODO_RENDER_CAP) {
-        let status_label = todo_status_label(&item.status);
-        let priority_label = todo_priority_label(&item.priority);
-        let marker = todo_status_marker(&item.status);
-
-        let tag_budget = status_label.chars().count() + priority_label.chars().count() + 16;
-        let content_budget = max.saturating_sub(tag_budget).max(12);
-        let content = truncate_to(item.content.trim(), content_budget);
-
-        let marker_style = Style::default()
-            .fg(todo_status_fg(&item.status, app))
-            .add_modifier(Modifier::BOLD);
-        let text_style = if item.status.eq_ignore_ascii_case("completed")
-            || item.status.eq_ignore_ascii_case("cancelled")
-        {
-            Style::default().fg(app.theme.text_muted)
-        } else {
-            Style::default().fg(app.theme.text_secondary)
-        };
-        let status_tag_style = Style::default()
-            .fg(todo_status_fg(&item.status, app))
-            .bg(app.theme.pill_muted_bg)
-            .add_modifier(Modifier::BOLD);
-        let (priority_fg, priority_bg) = todo_priority_colors(&item.priority, app);
-        let priority_tag_style = Style::default()
-            .fg(priority_fg)
-            .bg(priority_bg)
-            .add_modifier(Modifier::BOLD);
-
-        out.push(RenderedChatLine {
-            line: Line::from(vec![
-                Span::styled(format!("      {marker} "), marker_style),
-                Span::styled(content, text_style),
-                Span::raw("  "),
-                Span::styled(format!(" {status_label} "), status_tag_style),
-                Span::raw(" "),
-                Span::styled(format!(" {priority_label} "), priority_tag_style),
-            ]),
-            toggle_key: None,
-        });
-    }
-
-    if items.len() > TODO_RENDER_CAP {
-        out.push(RenderedChatLine {
-            line: Line::from(Span::styled(
-                format!(
-                    "      ... {} more todos",
-                    items.len().saturating_sub(TODO_RENDER_CAP)
-                ),
-                Style::default().fg(app.theme.text_muted),
-            )),
-            toggle_key: None,
-        });
-    }
-
-    out
-}
-
-fn todo_status_marker(status: &str) -> &'static str {
-    if status.eq_ignore_ascii_case("completed") {
-        "[x]"
-    } else if status.eq_ignore_ascii_case("in_progress") {
-        "[~]"
-    } else if status.eq_ignore_ascii_case("cancelled") {
-        "[-]"
-    } else {
-        "[ ]"
-    }
-}
-
-fn todo_status_label(status: &str) -> &'static str {
-    if status.eq_ignore_ascii_case("completed") {
-        "completed"
-    } else if status.eq_ignore_ascii_case("in_progress") {
-        "active"
-    } else if status.eq_ignore_ascii_case("cancelled") {
-        "cancelled"
-    } else {
-        "pending"
-    }
-}
-
-fn todo_status_fg(status: &str, app: &App) -> Color {
-    if status.eq_ignore_ascii_case("completed") {
-        app.theme.pill_ok_fg
-    } else if status.eq_ignore_ascii_case("in_progress") {
-        app.theme.pill_info_fg
-    } else if status.eq_ignore_ascii_case("cancelled") {
-        app.theme.text_muted
-    } else {
-        app.theme.pill_warn_fg
-    }
-}
-
-fn todo_priority_label(priority: &str) -> &'static str {
-    if priority.eq_ignore_ascii_case("high") {
-        "high"
-    } else if priority.eq_ignore_ascii_case("low") {
-        "low"
-    } else {
-        "medium"
-    }
-}
-
-fn todo_priority_colors(priority: &str, app: &App) -> (Color, Color) {
-    if priority.eq_ignore_ascii_case("high") {
-        (app.theme.pill_err_fg, app.theme.pill_err_bg)
-    } else if priority.eq_ignore_ascii_case("low") {
-        (app.theme.pill_info_fg, app.theme.pill_info_bg)
-    } else {
-        (app.theme.pill_warn_fg, app.theme.pill_warn_bg)
-    }
+    format!("{total} todos ({completed} done{priority_suffix})")
 }
 
 fn is_hidden_noise_line(value: &str) -> bool {
@@ -888,7 +801,7 @@ fn is_hidden_noise_line(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_todo_items, todo_preview_label};
+    use super::{PatchOp, parse_patch_summary, parse_todo_items, todo_preview_label};
 
     #[test]
     fn parses_todo_envelope_payload() {
@@ -913,9 +826,50 @@ mod tests {
 
     #[test]
     fn formats_todo_preview_summary() {
-        let payload =
-            r#"[{"content":"A","status":"completed","priority":"high"},{"content":"B","status":"completed","priority":"low"}]"#;
+        let payload = r#"[{"content":"A","status":"completed","priority":"high"},{"content":"B","status":"completed","priority":"low"}]"#;
         let items = parse_todo_items(payload).expect("expected todo list");
-        assert_eq!(todo_preview_label(&items), "2 todos completed");
+        assert_eq!(todo_preview_label(&items), "2 todos completed, 1 high");
+    }
+
+    #[test]
+    fn parses_patch_from_raw_text() {
+        let raw = "*** Begin Patch\n*** Update File: src/main.rs\n@@ -1,3 +1,3 @@\n some code\n*** Add File: src/new.rs\n+new file content\n*** End Patch";
+        let summary = parse_patch_summary(raw).expect("expected patch summary");
+        assert_eq!(summary.files.len(), 2);
+        assert_eq!(summary.files[0].op, PatchOp::Update);
+        assert_eq!(summary.files[0].path, "src/main.rs");
+        assert_eq!(summary.files[1].op, PatchOp::Add);
+        assert_eq!(summary.files[1].path, "src/new.rs");
+    }
+
+    #[test]
+    fn parses_patch_from_json_wrapper() {
+        let raw = r#"{"patchText": "*** Begin Patch\n*** Delete File: old.rs\n*** Update File: lib.rs\n@@ -1 +1 @@\n-old\n+new\n*** End Patch"}"#;
+        let summary = parse_patch_summary(raw).expect("expected patch summary");
+        assert_eq!(summary.files.len(), 2);
+        assert_eq!(summary.files[0].op, PatchOp::Delete);
+        assert_eq!(summary.files[0].path, "old.rs");
+        assert_eq!(summary.files[1].op, PatchOp::Update);
+        assert_eq!(summary.files[1].path, "lib.rs");
+    }
+
+    #[test]
+    fn patch_compact_label_single_file() {
+        let raw = "*** Begin Patch\n*** Update File: src/app.rs\n@@ -1 +1 @@\n-old\n+new";
+        let summary = parse_patch_summary(raw).expect("expected patch summary");
+        assert_eq!(summary.compact_label(), "~1 app.rs");
+    }
+
+    #[test]
+    fn patch_compact_label_multiple_ops() {
+        let raw = "*** Add File: a.rs\n*** Update File: b.rs\n*** Delete File: c.rs\n*** Update File: d.rs";
+        let summary = parse_patch_summary(raw).expect("expected patch summary");
+        assert_eq!(summary.compact_label(), "+1 ~2 -1 (4 files)");
+    }
+
+    #[test]
+    fn patch_returns_none_for_non_patch() {
+        assert!(parse_patch_summary("just some random text").is_none());
+        assert!(parse_patch_summary(r#"{"key": "value"}"#).is_none());
     }
 }

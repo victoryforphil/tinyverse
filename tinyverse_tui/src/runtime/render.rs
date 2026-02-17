@@ -1,32 +1,40 @@
+use ansi_to_tui::IntoText;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Wrap};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tinyverse_tui_components::{
+    KeyBind, PaneBlockComponent, StatusPill, Tone, anchored_rect, centered_rect, compact_text,
+    inset_rect,
+};
 
 use crate::app::{
     ACTION_MENU_DANGER_SPLIT_AFTER, App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction,
     SessionTreeNode, SessionsViewMode, SidebarTab,
 };
 use crate::chat::ChatMessageRole;
+use crate::theme::UiTheme;
 
 use super::chat_render::render_chat_tab;
-use super::helpers::{
-    anchored_rect, centered_rect, inset_rect, key_hint, pill_badge, status_pill, styled_panel,
-    tag_pill, truncate_to,
-};
+use super::session_tree_render::render_session_tree;
 
 const CARD_HEIGHT: u16 = 10;
 const CARD_GAP_X: u16 = 2;
 const CARD_GAP_Y: u16 = 1;
 const CARD_MIN_GRID_WIDTH: u16 = 34;
+const MINIMIZED_PANEL_WIDTH: u16 = 7;
+const MINIMIZED_SIDEBAR_WIDTH: u16 = 9;
 
 pub(crate) fn render_frame(frame: &mut Frame, app: &mut App) {
     let root = frame.area();
     app.layout = Default::default();
 
-    frame.render_widget(Clear, root);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(app.theme.base_bg)),
+        root,
+    );
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -43,6 +51,7 @@ pub(crate) fn render_frame(frame: &mut Frame, app: &mut App) {
     render_footer(frame, chunks[2], app);
 
     match app.mode {
+        AppMode::PaneFocus => {}
         AppMode::ActionMenu => render_action_menu(frame, root, app),
         AppMode::ConfirmKill => render_kill_confirmation(frame, root, app),
         AppMode::ConfirmKillAll => render_kill_all_confirmation(frame, root, app),
@@ -96,14 +105,32 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
     };
 
     if top_area.width >= 90 {
-        let left_pct = app.inspector_ratio.clamp(40, 80);
-        let split = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(left_pct),
-                Constraint::Percentage(100 - left_pct),
-            ])
-            .split(top_area);
+        let split = if app.sessions_minimized {
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Length(MINIMIZED_PANEL_WIDTH),
+                    Constraint::Min(20),
+                ])
+                .split(top_area)
+        } else if app.sidebar_minimized {
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Min(20),
+                    Constraint::Length(MINIMIZED_SIDEBAR_WIDTH),
+                ])
+                .split(top_area)
+        } else {
+            let left_pct = app.inspector_ratio.clamp(40, 80);
+            Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(left_pct),
+                    Constraint::Percentage(100 - left_pct),
+                ])
+                .split(top_area)
+        };
         app.layout.divider_x = Some(split[0].right());
         render_sessions_panel(frame, split[0], app);
         render_sidebar(frame, split[1], app);
@@ -120,6 +147,32 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
+    app.layout.sessions_header_rect = Some(Rect {
+        x: area.x.saturating_add(1),
+        y: area.y,
+        width: area.width.saturating_sub(2),
+        height: 1,
+    });
+
+    if app.sessions_minimized {
+        let panel = styled_panel("S.", true, &app.theme);
+        let inner = inset_rect(panel.inner(area), 1, 1);
+        frame.render_widget(panel, area);
+        if inner.width > 0 && inner.height > 0 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "◂",
+                    Style::default().fg(app.theme.text_secondary),
+                ))),
+                inner,
+            );
+        }
+        app.layout.card_rects.clear();
+        app.layout.card_kill_rects.clear();
+        app.layout.session_tree_row_rects.clear();
+        return;
+    }
+
     let panel = styled_panel("Sessions", true, &app.theme);
     let inner = inset_rect(panel.inner(area), 1, 1);
     frame.render_widget(panel, area);
@@ -129,7 +182,21 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         .constraints([Constraint::Length(1), Constraint::Min(1)])
         .split(inner);
     render_sessions_view_tabs(frame, app, sections[0]);
-    let inner = inset_rect(sections[1], 1, 0);
+    let content = inset_rect(sections[1], 1, 0);
+
+    let body_sections = if content.height >= 16 {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(8), Constraint::Length(7)])
+            .split(content)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(0)])
+            .split(content)
+    };
+    let cards_area = body_sections[0];
+    let threads_area = body_sections[1];
 
     app.layout.session_tree_row_rects.clear();
 
@@ -141,7 +208,7 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         .style(Style::default().fg(app.theme.text_secondary))
         .wrap(Wrap { trim: true });
 
-        let popup = centered_rect(58, 5, inner);
+        let popup = centered_rect(58, 5, cards_area);
         frame.render_widget(
             Block::default()
                 .title(" TinyVerse ")
@@ -154,11 +221,11 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 
     let session_count = app.sessions.len();
-    let (cols, card_width) = card_grid_layout(inner.width, session_count);
+    let (cols, card_width) = card_grid_layout(cards_area.width, session_count);
     let stride_x = card_width + CARD_GAP_X;
     let stride_y = CARD_HEIGHT + CARD_GAP_Y;
     let cols_usize = cols as usize;
-    let visible_rows = ((inner.height + CARD_GAP_Y) / stride_y).max(1) as usize;
+    let visible_rows = ((cards_area.height + CARD_GAP_Y) / stride_y).max(1) as usize;
     let selected_row = app.selected_index / cols_usize;
 
     if selected_row < app.scroll_row {
@@ -184,14 +251,14 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
     {
         let row = (view_index as u16) / cols;
         let col = (view_index as u16) % cols;
-        let x = inner.x + col * stride_x;
-        let y = inner.y + row * stride_y;
+        let x = cards_area.x + col * stride_x;
+        let y = cards_area.y + row * stride_y;
 
-        if y + CARD_HEIGHT > inner.bottom() {
+        if y + CARD_HEIGHT > cards_area.bottom() {
             break;
         }
 
-        let width = card_width.min(inner.right().saturating_sub(x));
+        let width = card_width.min(cards_area.right().saturating_sub(x));
         if width < 20 {
             continue;
         }
@@ -357,16 +424,84 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
 
         frame.render_widget(body, card_inner);
     }
+
+    if threads_area.height > 0 {
+        render_threads_panel(frame, threads_area, app);
+    }
+}
+
+fn render_threads_panel(frame: &mut Frame, area: Rect, app: &mut App) {
+    let selected_index = app.selected_index.min(app.sessions.len().saturating_sub(1));
+    let threads = app
+        .session_tree_rows
+        .iter()
+        .filter_map(|row| match &row.node {
+            SessionTreeNode::ChatSession {
+                session_index,
+                chat_session_id,
+            } if *session_index == selected_index => {
+                Some((row.label.as_str(), chat_session_id.as_str()))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    let title = format!("Threads ({})", threads.len());
+    let block = Block::default()
+        .title(format!(" {title} "))
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(app.theme.pane_unfocused_border));
+    let inner = inset_rect(block.inner(area), 1, 0);
+    frame.render_widget(block, area);
+
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    if threads.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No chat threads for selected session")
+                .style(Style::default().fg(app.theme.text_muted))
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    }
+
+    let active_id = app.chat_bridge.active_session_id();
+    let lines = threads
+        .into_iter()
+        .map(|(label, id)| {
+            let is_active = active_id == Some(id);
+            let marker = if is_active { "* " } else { "  " };
+            let text = compact_text(label, inner.width.saturating_sub(2) as usize);
+            let style = if is_active {
+                Style::default()
+                    .fg(app.theme.text_primary)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(app.theme.text_secondary)
+            };
+            Line::from(Span::styled(format!("{marker}{text}"), style))
+        })
+        .collect::<Vec<_>>();
+
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }
 
 fn render_sessions_panel(frame: &mut Frame, area: Rect, app: &mut App) {
+    if app.sessions_minimized {
+        render_cards(frame, area, app);
+        return;
+    }
+
     match app.sessions_view_mode {
         SessionsViewMode::Graphical => render_cards(frame, area, app),
         SessionsViewMode::Tree => render_session_tree(frame, area, app),
     }
 }
 
-fn render_sessions_view_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
+pub(super) fn render_sessions_view_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     app.layout.sessions_view_tab_rects.clear();
     let mut spans = Vec::new();
     let mut cursor_x = area.x;
@@ -406,167 +541,6 @@ fn render_sessions_view_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_session_tree(frame: &mut Frame, area: Rect, app: &mut App) {
-    let panel = styled_panel("Sessions", true, &app.theme);
-    let inner = inset_rect(panel.inner(area), 1, 1);
-    frame.render_widget(panel, area);
-
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(inner);
-    render_sessions_view_tabs(frame, app, sections[0]);
-
-    let tree_area = inset_rect(sections[1], 1, 0);
-    app.layout.card_rects.clear();
-    app.layout.card_kill_rects.clear();
-    app.layout.session_tree_row_rects.clear();
-
-    if app.session_tree_rows.is_empty() {
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "No sessions found",
-                Style::default().fg(app.theme.text_secondary),
-            ))),
-            tree_area,
-        );
-        return;
-    }
-
-    if tree_area.width == 0 || tree_area.height == 0 {
-        return;
-    }
-
-    let show_hint = app.session_tree_rows.len() > tree_area.height as usize;
-    let body_height = if show_hint {
-        tree_area.height.saturating_sub(1).max(1)
-    } else {
-        tree_area.height
-    };
-    let visible_count = body_height as usize;
-    let max_window_start = app.session_tree_rows.len().saturating_sub(visible_count);
-
-    if app.session_tree_cursor < app.session_tree_scroll {
-        app.session_tree_scroll = app.session_tree_cursor;
-    }
-    if app.session_tree_cursor >= app.session_tree_scroll + visible_count {
-        app.session_tree_scroll = app
-            .session_tree_cursor
-            .saturating_add(1)
-            .saturating_sub(visible_count);
-    }
-    app.session_tree_scroll = app.session_tree_scroll.min(max_window_start);
-
-    let window_start = app.session_tree_scroll;
-    let window_end = (window_start + visible_count).min(app.session_tree_rows.len());
-
-    let mut lines = Vec::with_capacity(visible_count);
-    for (offset, row) in app.session_tree_rows[window_start..window_end]
-        .iter()
-        .enumerate()
-    {
-        let row_index = window_start + offset;
-        let selected = row_index == app.session_tree_cursor;
-        let active_target = is_tree_row_active_target(app, row);
-        let row_area = Rect {
-            x: tree_area.x,
-            y: tree_area.y + offset as u16,
-            width: tree_area.width,
-            height: 1,
-        };
-        app.layout
-            .session_tree_row_rects
-            .push((row_index, row_area));
-
-        let mut line_style = Style::default().fg(app.theme.text_secondary);
-        if selected {
-            line_style = line_style.bg(app.theme.selected_card_bg);
-        }
-
-        let mut prefix_style = Style::default().fg(app.theme.text_muted);
-        if selected {
-            prefix_style = prefix_style.bg(app.theme.selected_card_bg);
-        }
-        if active_target {
-            line_style = line_style
-                .fg(app.theme.pane_focused_border)
-                .add_modifier(Modifier::BOLD);
-        }
-
-        let prefix = row.prefix();
-        let icon = tree_node_icon(&row.node);
-        let mut spans = vec![Span::styled(prefix, prefix_style)];
-        if !icon.is_empty() {
-            spans.push(Span::styled(icon, line_style));
-            spans.push(Span::styled(" ", line_style));
-        }
-        spans.push(Span::styled(row.label.clone(), line_style));
-        let line = Line::from(spans);
-        lines.push(line);
-    }
-
-    while lines.len() < visible_count {
-        lines.push(Line::from(""));
-    }
-
-    let body_area = Rect {
-        x: tree_area.x,
-        y: tree_area.y,
-        width: tree_area.width,
-        height: body_height,
-    };
-    frame.render_widget(Paragraph::new(lines), body_area);
-
-    if show_hint {
-        let hint = Paragraph::new(format!(
-            "showing {}-{} of {}",
-            window_start + 1,
-            window_end,
-            app.session_tree_rows.len()
-        ))
-        .style(Style::default().fg(app.theme.text_muted));
-        let hint_area = Rect {
-            x: tree_area.x,
-            y: tree_area
-                .y
-                .saturating_add(tree_area.height.saturating_sub(1)),
-            width: tree_area.width,
-            height: 1,
-        };
-        frame.render_widget(hint, hint_area);
-    }
-}
-
-fn tree_node_icon(node: &SessionTreeNode) -> &'static str {
-    match node {
-        SessionTreeNode::SessionRoot { .. } => "",
-        SessionTreeNode::SidebarPane { tab, .. } => match tab {
-            SidebarTab::Console => "$",
-            SidebarTab::Agent => "@",
-            SidebarTab::Chat => "#",
-        },
-        SessionTreeNode::ChatSession { .. } => ">",
-    }
-}
-
-fn is_tree_row_active_target(app: &App, row: &crate::app::SessionTreeRow) -> bool {
-    let selected_index = app.selected_index.min(app.sessions.len().saturating_sub(1));
-    match &row.node {
-        SessionTreeNode::SessionRoot { session_index } => *session_index == selected_index,
-        SessionTreeNode::SidebarPane { session_index, tab } => {
-            *session_index == selected_index && *tab == app.sidebar_tab
-        }
-        SessionTreeNode::ChatSession {
-            session_index,
-            chat_session_id,
-        } => {
-            *session_index == selected_index
-                && app.sidebar_tab == SidebarTab::Chat
-                && app.chat_bridge.active_session_id() == Some(chat_session_id.as_str())
-        }
-    }
-}
-
 fn card_grid_layout(inner_width: u16, session_count: usize) -> (u16, u16) {
     if inner_width == 0 {
         return (1, 0);
@@ -597,6 +571,31 @@ fn card_grid_layout(inner_width: u16, session_count: usize) -> (u16, u16) {
 }
 
 fn render_sidebar(frame: &mut Frame, area: Rect, app: &mut App) {
+    app.layout.sidebar_header_rect = Some(Rect {
+        x: area.x.saturating_add(1),
+        y: area.y,
+        width: area.width.saturating_sub(2),
+        height: 1,
+    });
+
+    if app.sidebar_minimized {
+        let block = styled_panel("P.", true, &app.theme);
+        let inner = inset_rect(block.inner(area), 1, 1);
+        frame.render_widget(block, area);
+        if inner.width > 0 && inner.height > 0 {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "▸",
+                    Style::default().fg(app.theme.text_secondary),
+                ))),
+                inner,
+            );
+        }
+        app.layout.sidebar_tab_rects.clear();
+        app.layout.sidebar_preview_rect = None;
+        return;
+    }
+
     let block = styled_panel(app.sidebar_tab.title(), true, &app.theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -649,27 +648,207 @@ fn render_sidebar(frame: &mut Frame, area: Rect, app: &mut App) {
         })
         .unwrap_or_else(|| String::from("Loading agent preview..."));
 
+    let preview_area = sidebar_chunks[1];
+    let is_focus_mode = app.mode == AppMode::PaneFocus;
+
     match app.sidebar_tab {
         SidebarTab::Console => {
-            let fitted = fit_preview_text(&console_preview, sidebar_chunks[1]);
-            frame.render_widget(
-                Paragraph::new(fitted).style(Style::default().fg(app.theme.text_secondary)),
-                sidebar_chunks[1],
+            render_pane_preview(
+                frame,
+                preview_area,
+                &console_preview,
+                "Console",
+                &session.session_name,
+                is_focus_mode,
+                app,
             );
         }
         SidebarTab::Agent => {
-            let fitted = fit_preview_text(&agent_preview, sidebar_chunks[1]);
-            frame.render_widget(
-                Paragraph::new(fitted).style(Style::default().fg(app.theme.text_secondary)),
-                sidebar_chunks[1],
+            render_pane_preview(
+                frame,
+                preview_area,
+                &agent_preview,
+                "Agent",
+                &session.session_name,
+                is_focus_mode,
+                app,
             );
         }
         SidebarTab::Chat => {}
     }
 }
 
+fn render_pane_preview(
+    frame: &mut Frame,
+    area: Rect,
+    preview_text: &str,
+    pane_label: &str,
+    session_name: &str,
+    is_focus_mode: bool,
+    app: &App,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(area);
+
+    let mode_badge = if is_focus_mode {
+        (" live ", app.theme.pill_ok_fg, app.theme.pill_ok_bg)
+    } else {
+        (
+            " snapshot ",
+            app.theme.pill_muted_fg,
+            app.theme.pill_muted_bg,
+        )
+    };
+
+    let header = Line::from(vec![
+        Span::styled(
+            format!(" {} ", pane_label),
+            Style::default()
+                .fg(app.theme.key_hint_key_fg)
+                .bg(app.theme.key_hint_key_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            mode_badge.0,
+            Style::default()
+                .fg(mode_badge.1)
+                .bg(mode_badge.2)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            compact_text(session_name, chunks[0].width.saturating_sub(18) as usize),
+            Style::default().fg(app.theme.text_muted),
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(header), chunks[0]);
+
+    if let Some(text) = fit_preview_ansi_text(preview_text, chunks[1]) {
+        frame.render_widget(Paragraph::new(text), chunks[1]);
+    } else {
+        let fitted = fit_preview_text(preview_text, chunks[1]);
+        frame.render_widget(
+            Paragraph::new(fitted).style(Style::default().fg(app.theme.text_secondary)),
+            chunks[1],
+        );
+    }
+}
+
+fn fit_preview_ansi_text(text: &str, area: Rect) -> Option<Text<'static>> {
+    if area.width == 0 || area.height == 0 || text.trim().is_empty() {
+        return None;
+    }
+
+    let parsed = text.as_bytes().to_vec().into_text().ok()?;
+    if parsed.lines.is_empty() {
+        return None;
+    }
+
+    let max_lines = area.height as usize;
+    let start = parsed.lines.len().saturating_sub(max_lines);
+    let lines = parsed.lines[start..]
+        .iter()
+        .map(convert_core_line)
+        .collect::<Vec<_>>();
+
+    Some(Text::from(lines))
+}
+
+fn convert_core_line(line: &ratatui_core::text::Line<'_>) -> Line<'static> {
+    let mut spans = Vec::new();
+    for span in &line.spans {
+        let content = span.content.as_ref().to_owned();
+        if content.is_empty() {
+            continue;
+        }
+        spans.push(Span::styled(content, convert_core_style(span.style)));
+    }
+
+    Line::from(spans)
+}
+
+fn convert_core_style(style: ratatui_core::style::Style) -> Style {
+    let mut out = Style::default();
+    if let Some(fg) = style.fg {
+        out = out.fg(convert_core_color(fg));
+    }
+    let add = convert_core_modifier(style.add_modifier);
+    if !add.is_empty() {
+        out = out.add_modifier(add);
+    }
+    let sub = convert_core_modifier(style.sub_modifier);
+    if !sub.is_empty() {
+        out = out.remove_modifier(sub);
+    }
+
+    out
+}
+
+fn convert_core_color(color: ratatui_core::style::Color) -> Color {
+    match color {
+        ratatui_core::style::Color::Reset => Color::Reset,
+        ratatui_core::style::Color::Black => Color::Black,
+        ratatui_core::style::Color::Red => Color::Red,
+        ratatui_core::style::Color::Green => Color::Green,
+        ratatui_core::style::Color::Yellow => Color::Yellow,
+        ratatui_core::style::Color::Blue => Color::Blue,
+        ratatui_core::style::Color::Magenta => Color::Magenta,
+        ratatui_core::style::Color::Cyan => Color::Cyan,
+        ratatui_core::style::Color::Gray => Color::Gray,
+        ratatui_core::style::Color::DarkGray => Color::DarkGray,
+        ratatui_core::style::Color::LightRed => Color::LightRed,
+        ratatui_core::style::Color::LightGreen => Color::LightGreen,
+        ratatui_core::style::Color::LightYellow => Color::LightYellow,
+        ratatui_core::style::Color::LightBlue => Color::LightBlue,
+        ratatui_core::style::Color::LightMagenta => Color::LightMagenta,
+        ratatui_core::style::Color::LightCyan => Color::LightCyan,
+        ratatui_core::style::Color::White => Color::White,
+        ratatui_core::style::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
+        ratatui_core::style::Color::Indexed(v) => Color::Indexed(v),
+    }
+}
+
+fn convert_core_modifier(modifier: ratatui_core::style::Modifier) -> Modifier {
+    let mut out = Modifier::empty();
+    if modifier.contains(ratatui_core::style::Modifier::BOLD) {
+        out |= Modifier::BOLD;
+    }
+    if modifier.contains(ratatui_core::style::Modifier::DIM) {
+        out |= Modifier::DIM;
+    }
+    if modifier.contains(ratatui_core::style::Modifier::ITALIC) {
+        out |= Modifier::ITALIC;
+    }
+    if modifier.contains(ratatui_core::style::Modifier::UNDERLINED) {
+        out |= Modifier::UNDERLINED;
+    }
+    if modifier.contains(ratatui_core::style::Modifier::SLOW_BLINK) {
+        out |= Modifier::SLOW_BLINK;
+    }
+    if modifier.contains(ratatui_core::style::Modifier::RAPID_BLINK) {
+        out |= Modifier::RAPID_BLINK;
+    }
+    if modifier.contains(ratatui_core::style::Modifier::REVERSED) {
+        out |= Modifier::REVERSED;
+    }
+    if modifier.contains(ratatui_core::style::Modifier::HIDDEN) {
+        out |= Modifier::HIDDEN;
+    }
+    if modifier.contains(ratatui_core::style::Modifier::CROSSED_OUT) {
+        out |= Modifier::CROSSED_OUT;
+    }
+    out
+}
+
 fn render_bottom_inspector(frame: &mut Frame, area: Rect, app: &App) {
-    let block = styled_panel("Inspector", true, &app.theme);
+    let block = styled_panel_transparent("Inspector", true, &app.theme);
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -974,7 +1153,7 @@ fn preview_excerpt_lines(text: &str, width: usize, max_lines: usize) -> Vec<Stri
     out
 }
 
-fn relative_time_ago(event_unix_seconds: i64) -> String {
+pub(super) fn relative_time_ago(event_unix_seconds: i64) -> String {
     if event_unix_seconds <= 0 {
         return String::from("unknown");
     }
@@ -1290,6 +1469,12 @@ fn footer_actions_for_mode(mode: AppMode) -> Vec<FooterHotkeyAction> {
             FooterHotkeyAction::Spawn,
             FooterHotkeyAction::Kill,
             FooterHotkeyAction::SessionView,
+            FooterHotkeyAction::PaneFocus,
+        ],
+        AppMode::PaneFocus => vec![
+            FooterHotkeyAction::PaneFocus,
+            FooterHotkeyAction::PaneFocusExit,
+            FooterHotkeyAction::Navigate,
         ],
         AppMode::ActionMenu => vec![
             FooterHotkeyAction::FormSubmit,
@@ -1367,6 +1552,45 @@ pub(super) fn footer_hotkey_hit_test(app: &App, col: u16, row: u16) -> Option<Fo
     }
 
     None
+}
+
+pub(super) fn styled_panel<'a>(title: &'a str, focused: bool, theme: &UiTheme) -> Block<'a> {
+    PaneBlockComponent::build(title, focused, theme)
+}
+
+pub(super) fn styled_panel_transparent<'a>(
+    title: &'a str,
+    focused: bool,
+    theme: &UiTheme,
+) -> Block<'a> {
+    PaneBlockComponent::build_transparent(title, focused, theme)
+}
+
+fn status_pill(status: &str, theme: &UiTheme) -> Span<'static> {
+    let lowered = status.to_ascii_lowercase();
+    let tone = match lowered.as_str() {
+        "active" => Tone::Ok,
+        "stale" => Tone::Warn,
+        "dead" => Tone::Error,
+        _ => Tone::Muted,
+    };
+    StatusPill::for_tone(lowered, tone, theme).span()
+}
+
+fn tag_pill(label: &str, theme: &UiTheme) -> Span<'static> {
+    StatusPill::accent(label, theme).span()
+}
+
+fn pill_badge(label: &str, fg: Color, bg: Color, bold: bool) -> Span<'static> {
+    StatusPill::custom(label, fg, bg, bold).span()
+}
+
+fn truncate_to(value: &str, max_len: usize) -> String {
+    compact_text(value, max_len)
+}
+
+fn key_hint(key: &'static str, action: &'static str, theme: &UiTheme) -> Vec<Span<'static>> {
+    KeyBind::new(key, action).spans(theme)
 }
 
 #[cfg(test)]

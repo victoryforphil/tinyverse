@@ -5,8 +5,8 @@ expression: snapshot
 tinyverse tui  |  1 session(s)
 ╭ Sessions ──────────────────────────────────────────────────────────╮╭ Console ───────────────────────────────────────╮
 │                                                                    ││ 1  Cons   2  Agent   3  Chat                   │
-│  Graph   Tree                                                      ││Loading console preview...                      │
-│  ┌ tinyverse_alpha ────────────────────────────────────────── X ┐  ││                                                │
+│  Graph   Tree                                                      ││ Console   snapshot  tinyverse_alpha            │
+│  ┌ tinyverse_alpha ────────────────────────────────────────── X ┐  ││Loading console preview...                      │
 │  │  active   opencode                                           │  ││                                                │
 │  │  openai/gpt-5.3-codex   0 msgs                               │  ││                                                │
 │  │                                                              │  ││                                                │
@@ -20,13 +20,13 @@ tinyverse tui  |  1 session(s)
 │                              │Kill session `tinyverse_alpha`?                         │                              │
 │                              │This will terminate tmux session and remove DB record.  │                              │
 │                              │                                                        │                              │
-│                              │[y/enter] confirm  [n/esc] cancel                       │                              │
-│                              │                                                        │                              │
-│                              ╰────────────────────────────────────────────────────────╯                              │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
+│  ┌ Threads (0) ──────────────│[y/enter] confirm  [n/esc] cancel                       │                              │
+│  │ No chat threads for select│                                                        │                              │
+│  │                           ╰────────────────────────────────────────────────────────╯                              │
+│  │                                                              │  ││                                                │
+│  │                                                              │  ││                                                │
+│  │                                                              │  ││                                                │
+│  └──────────────────────────────────────────────────────────────┘  ││                                                │
 │                                                                    ││                                                │
 ╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭ Inspector ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮

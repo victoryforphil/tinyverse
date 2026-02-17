@@ -1,13 +1,11 @@
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use tinyverse_tui_components::{
+    ListViewport, PopupAnchor, PopupItem, PopupOverlay, PopupOverlayProps,
+};
 
 use crate::app::App;
 use crate::chat::ComposerAutocompleteMode;
-
-use crate::runtime::helpers::{inset_rect, truncate_to};
 
 const CHAT_POPUP_MAX_VISIBLE: usize = 8;
 
@@ -21,14 +19,13 @@ enum PopupLayoutTarget {
 struct PopupConfig {
     target: PopupLayoutTarget,
     title: &'static str,
-    items: Vec<String>,
+    items: Vec<PopupItem>,
     selected: usize,
     query: Option<(String, String)>,
     hint: Option<String>,
-    anchor_x: u16,
-    anchor_y: u16,
+    anchor: PopupAnchor,
     min_width: u16,
-    with_query: bool,
+    max_width: u16,
 }
 
 pub(super) fn render_chat_popups(
@@ -49,19 +46,36 @@ fn render_model_selector_popup(
     app: &mut App,
 ) {
     if !app.chat.is_model_selector_open() {
-        app.layout.chat.model_selector_rect = None;
-        app.layout.chat.model_selector_list_rect = None;
-        app.layout.chat.model_selector_query_rect = None;
-        app.layout.chat.model_selector_list_start = 0;
+        clear_popup_layout(app, PopupLayoutTarget::Model);
         return;
     }
 
-    let items = app.chat.model_selector_items();
+    let raw_items = app.chat.model_selector_items();
+    let mut items = Vec::with_capacity(raw_items.len());
+    for label in raw_items {
+        items.push(PopupItem {
+            label,
+            tag: None,
+            active: false,
+        });
+    }
     let selected = app
         .chat
         .model_selector
         .selected
         .min(items.len().saturating_sub(1));
+
+    let query = if app.chat.model_selector.raw_mode {
+        (
+            String::from("RAW"),
+            app.chat.model_selector.raw_input.clone(),
+        )
+    } else {
+        (
+            String::from("FILTER"),
+            app.chat.model_selector.query.clone(),
+        )
+    };
 
     render_popup(
         frame,
@@ -72,27 +86,18 @@ fn render_model_selector_popup(
             title: "Model Picker",
             items,
             selected,
-            query: Some((
-                if app.chat.model_selector.raw_mode {
-                    String::from("RAW")
-                } else {
-                    String::from("FILTER")
-                },
-                if app.chat.model_selector.raw_mode {
-                    app.chat.model_selector.raw_input.clone()
-                } else {
-                    app.chat.model_selector.query.clone()
-                },
-            )),
-            hint: Some(String::from("enter select  tab raw  esc close")),
-            anchor_x: app
-                .chat
-                .model_selector
-                .anchor_col
-                .unwrap_or_else(|| composer_area.x.saturating_add(2)),
-            anchor_y: composer_area.y,
+            query: Some(query),
+            hint: None,
+            anchor: PopupAnchor::At {
+                x: app
+                    .chat
+                    .model_selector
+                    .anchor_col
+                    .unwrap_or_else(|| composer_area.x.saturating_add(2)),
+                y: composer_area.y,
+            },
             min_width: 34,
-            with_query: true,
+            max_width: 48,
         },
     );
 }
@@ -104,14 +109,19 @@ fn render_agent_selector_popup(
     app: &mut App,
 ) {
     if !app.chat.is_agent_selector_open() {
-        app.layout.chat.agent_selector_rect = None;
-        app.layout.chat.agent_selector_list_rect = None;
-        app.layout.chat.agent_selector_query_rect = None;
-        app.layout.chat.agent_selector_list_start = 0;
+        clear_popup_layout(app, PopupLayoutTarget::Agent);
         return;
     }
 
-    let items = app.chat.agent_selector_items();
+    let raw_items = app.chat.agent_selector_items();
+    let mut items = Vec::with_capacity(raw_items.len());
+    for label in raw_items {
+        items.push(PopupItem {
+            label,
+            tag: None,
+            active: false,
+        });
+    }
     let selected = app
         .chat
         .agent_selector
@@ -131,15 +141,17 @@ fn render_agent_selector_popup(
                 String::from("FILTER"),
                 app.chat.agent_selector.query.clone(),
             )),
-            hint: Some(String::from("enter select  esc close")),
-            anchor_x: app
-                .chat
-                .agent_selector
-                .anchor_col
-                .unwrap_or_else(|| composer_area.x.saturating_add(18)),
-            anchor_y: composer_area.y,
+            hint: None,
+            anchor: PopupAnchor::At {
+                x: app
+                    .chat
+                    .agent_selector
+                    .anchor_col
+                    .unwrap_or_else(|| composer_area.x.saturating_add(18)),
+                y: composer_area.y,
+            },
             min_width: 28,
-            with_query: true,
+            max_width: 44,
         },
     );
 }
@@ -149,19 +161,19 @@ fn render_autocomplete_popup(frame: &mut Frame, parent: Rect, composer_area: Rec
         || app.chat.is_model_selector_open()
         || app.chat.is_agent_selector_open()
     {
-        app.layout.chat.autocomplete_rect = None;
-        app.layout.chat.autocomplete_list_rect = None;
-        app.layout.chat.autocomplete_list_start = 0;
+        clear_popup_layout(app, PopupLayoutTarget::Autocomplete);
         return;
     }
 
-    let items = app
-        .chat
-        .autocomplete
-        .items
-        .iter()
-        .map(|item| format!("{} [{}]", item.label, item.tag))
-        .collect::<Vec<_>>();
+    let ac_items = &app.chat.autocomplete.items;
+    let mut items = Vec::with_capacity(ac_items.len());
+    for item in ac_items {
+        items.push(PopupItem {
+            label: item.label.clone(),
+            tag: Some(item.tag.clone()),
+            active: false,
+        });
+    }
     let selected = app
         .chat
         .autocomplete
@@ -185,147 +197,112 @@ fn render_autocomplete_popup(frame: &mut Frame, parent: Rect, composer_area: Rec
             selected,
             query: None,
             hint: None,
-            anchor_x: composer_area.x.saturating_add(col as u16),
-            anchor_y: composer_area.y,
+            anchor: PopupAnchor::At {
+                x: composer_area.x.saturating_add(col as u16),
+                y: composer_area.y,
+            },
             min_width: 32,
-            with_query: false,
+            max_width: 52,
         },
     );
 }
 
 fn render_popup(frame: &mut Frame, parent: Rect, app: &mut App, config: PopupConfig) {
-    let popup = popup_rect(
-        parent,
-        config.anchor_x,
-        config.anchor_y,
-        config.min_width,
-        config.items.len().max(1),
-        config.with_query,
-    );
-    set_popup_rect(app, config.target, popup);
+    let selected = config.selected.min(config.items.len().saturating_sub(1));
+    let (query_text, query_label) = match config.query {
+        Some((label, value)) => (Some(value), Some(label)),
+        None => (None, None),
+    };
+    let has_query = query_text.is_some();
+    let has_hint = config.hint.is_some();
 
-    frame.render_widget(Clear, popup);
-    let block = Block::default()
-        .title(format!(" {} ", config.title))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.pane_focused_border));
-    let inner = inset_rect(block.inner(popup), 1, 0);
-    frame.render_widget(block, popup);
+    let props = PopupOverlayProps {
+        title: config.title.to_owned(),
+        items: config.items,
+        selected,
+        query: query_text,
+        query_label,
+        hint: config.hint,
+        anchor: config.anchor,
+        max_visible: CHAT_POPUP_MAX_VISIBLE,
+        min_width: config.min_width,
+        max_width: config.max_width,
+    };
+
+    let Some(popup) = PopupOverlay::area(parent, &props) else {
+        clear_popup_layout(app, config.target);
+        return;
+    };
+
+    set_popup_rect(app, config.target, popup);
+    let sections = popup_sections(popup, has_query, has_hint);
+    set_popup_list_rect(app, config.target, sections.list);
+    set_popup_query_rect(app, config.target, sections.query);
+
+    let viewport = ListViewport::new(props.items.len(), sections.list.height as usize, selected);
+    set_popup_list_start(app, config.target, viewport.start);
+
+    PopupOverlay::render(frame, parent, &props, &app.theme);
+}
+
+#[derive(Clone, Copy)]
+struct PopupSections {
+    list: Rect,
+    query: Option<Rect>,
+}
+
+fn popup_sections(popup: Rect, has_query: bool, has_hint: bool) -> PopupSections {
+    let inner = Rect {
+        x: popup.x.saturating_add(1),
+        y: popup.y.saturating_add(1),
+        width: popup.width.saturating_sub(2),
+        height: popup.height.saturating_sub(2),
+    };
+
+    if inner.width == 0 || inner.height == 0 {
+        return PopupSections {
+            list: inner,
+            query: None,
+        };
+    }
 
     let mut constraints = vec![Constraint::Min(1)];
-    if config.query.is_some() {
+    if has_query {
         constraints.push(Constraint::Length(1));
     }
-    if config.hint.is_some() {
+    if has_hint {
         constraints.push(Constraint::Length(1));
     }
-    let sections = Layout::default()
+    let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(inner);
-    let list_area = sections[0];
 
-    set_popup_list_rect(app, config.target, list_area);
-
-    let viewport = list_viewport(
-        config.items.len(),
-        list_area.height as usize,
-        config.selected,
-    );
-    set_popup_list_start(app, config.target, viewport.0);
-
-    let mut lines = Vec::new();
-    for (row, item) in config.items[viewport.0..viewport.1].iter().enumerate() {
-        let index = viewport.0 + row;
-        let is_selected = index == config.selected;
-        lines.push(Line::from(vec![
-            Span::styled(
-                if is_selected { "▸ " } else { "  " },
-                Style::default().fg(app.theme.text_muted),
-            ),
-            Span::styled(
-                truncate_to(item, list_area.width.saturating_sub(3) as usize),
-                if is_selected {
-                    Style::default()
-                        .fg(app.theme.pill_accent_fg)
-                        .bg(app.theme.selected_card_bg)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(app.theme.text_secondary)
-                },
-            ),
-        ]));
-    }
-    if lines.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No matching options.",
-            Style::default().fg(app.theme.text_muted),
-        )));
-    }
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), list_area);
-
-    let mut section_index = 1usize;
-    if let Some((label, value)) = config.query {
-        if section_index < sections.len() {
-            let query_area = sections[section_index];
-            set_popup_query_rect(app, config.target, query_area);
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(
-                        format!(" {label} "),
-                        Style::default()
-                            .fg(app.theme.pill_accent_fg)
-                            .bg(app.theme.pill_accent_bg),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        format!("{value}_"),
-                        Style::default().fg(app.theme.text_secondary),
-                    ),
-                ])),
-                query_area,
-            );
-        }
-        section_index = section_index.saturating_add(1);
-    }
-
-    if let Some(hint_text) = config.hint
-        && section_index < sections.len()
-    {
-        frame.render_widget(
-            Paragraph::new(hint_text).style(Style::default().fg(app.theme.text_muted)),
-            sections[section_index],
-        );
+    PopupSections {
+        list: chunks[0],
+        query: has_query.then(|| chunks[1]),
     }
 }
 
-fn popup_rect(
-    parent: Rect,
-    anchor_x: u16,
-    anchor_y: u16,
-    min_width: u16,
-    item_len: usize,
-    with_query: bool,
-) -> Rect {
-    let width = min_width.min(parent.width.saturating_sub(2)).max(22);
-    let query_rows = u16::from(with_query);
-    let list_rows = item_len.min(CHAT_POPUP_MAX_VISIBLE).max(1) as u16;
-    let hint_rows = 1u16;
-    let height = (2 + list_rows + query_rows + hint_rows)
-        .min(parent.height.saturating_sub(1))
-        .max(4);
-
-    let x = anchor_x
-        .saturating_sub(width / 2)
-        .clamp(parent.x, parent.right().saturating_sub(width));
-    let y = anchor_y
-        .saturating_sub(height.saturating_sub(1))
-        .clamp(parent.y, parent.bottom().saturating_sub(height));
-    Rect {
-        x,
-        y,
-        width,
-        height,
+fn clear_popup_layout(app: &mut App, target: PopupLayoutTarget) {
+    match target {
+        PopupLayoutTarget::Model => {
+            app.layout.chat.model_selector_rect = None;
+            app.layout.chat.model_selector_list_rect = None;
+            app.layout.chat.model_selector_query_rect = None;
+            app.layout.chat.model_selector_list_start = 0;
+        }
+        PopupLayoutTarget::Agent => {
+            app.layout.chat.agent_selector_rect = None;
+            app.layout.chat.agent_selector_list_rect = None;
+            app.layout.chat.agent_selector_query_rect = None;
+            app.layout.chat.agent_selector_list_start = 0;
+        }
+        PopupLayoutTarget::Autocomplete => {
+            app.layout.chat.autocomplete_rect = None;
+            app.layout.chat.autocomplete_list_rect = None;
+            app.layout.chat.autocomplete_list_start = 0;
+        }
     }
 }
 
@@ -345,10 +322,10 @@ fn set_popup_list_rect(app: &mut App, target: PopupLayoutTarget, rect: Rect) {
     }
 }
 
-fn set_popup_query_rect(app: &mut App, target: PopupLayoutTarget, rect: Rect) {
+fn set_popup_query_rect(app: &mut App, target: PopupLayoutTarget, rect: Option<Rect>) {
     match target {
-        PopupLayoutTarget::Model => app.layout.chat.model_selector_query_rect = Some(rect),
-        PopupLayoutTarget::Agent => app.layout.chat.agent_selector_query_rect = Some(rect),
+        PopupLayoutTarget::Model => app.layout.chat.model_selector_query_rect = rect,
+        PopupLayoutTarget::Agent => app.layout.chat.agent_selector_query_rect = rect,
         PopupLayoutTarget::Autocomplete => {}
     }
 }
@@ -359,20 +336,4 @@ fn set_popup_list_start(app: &mut App, target: PopupLayoutTarget, start: usize) 
         PopupLayoutTarget::Agent => app.layout.chat.agent_selector_list_start = start,
         PopupLayoutTarget::Autocomplete => app.layout.chat.autocomplete_list_start = start,
     }
-}
-
-fn list_viewport(total: usize, visible: usize, selected: usize) -> (usize, usize) {
-    if total == 0 || visible == 0 {
-        return (0, 0);
-    }
-    if total <= visible {
-        return (0, total);
-    }
-
-    let max_start = total - visible;
-    let mut start = selected.saturating_sub(visible / 2);
-    if start > max_start {
-        start = max_start;
-    }
-    (start, start + visible)
 }

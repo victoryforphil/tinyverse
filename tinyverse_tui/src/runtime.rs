@@ -1,7 +1,7 @@
 mod chat_render;
 mod events;
-mod helpers;
 mod render;
+mod session_tree_render;
 
 use std::io;
 use std::path::PathBuf;
@@ -19,12 +19,14 @@ use ratatui::backend::CrosstermBackend;
 use tinyverse_lib::SessionStore;
 
 use crate::TuiRunOptions;
-use crate::app::App;
+use crate::app::{App, AppMode};
 use crate::logger::{init_logger, log_line, log_path};
 use crate::prefs;
 use crate::theme::load_theme;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(120);
+const PANE_FOCUS_REFRESH_INTERVAL: Duration = Duration::from_millis(300);
+const UI_TICK_INTERVAL: Duration = Duration::from_secs(1);
 
 pub fn run(options: TuiRunOptions) -> Result<()> {
     init_logger();
@@ -35,8 +37,9 @@ pub fn run(options: TuiRunOptions) -> Result<()> {
     let mut store = SessionStore::open_default()?;
     store.reconcile_now()?;
 
+    let theme_selector = options.theme.clone();
     let mut app = App::new(options);
-    app.theme = load_theme();
+    app.theme = load_theme(theme_selector.as_deref());
     let (repo_name, git_branch) = detect_git_metadata();
     app.repo_name = repo_name;
     app.git_branch = git_branch;
@@ -126,21 +129,45 @@ fn run_loop(
     app: &mut App,
 ) -> Result<()> {
     let mut next_refresh_at = Instant::now() + app.options.refresh_interval;
+    let mut next_pane_focus_refresh_at = Instant::now() + PANE_FOCUS_REFRESH_INTERVAL;
+    let mut next_ui_tick_at = Instant::now() + UI_TICK_INTERVAL;
+    let mut needs_draw = true;
 
     while !app.should_quit {
-        terminal.draw(|frame| render::render_frame(frame, app))?;
-
-        if event::poll(POLL_TIMEOUT)? {
-            let ev = event::read()?;
-            events::handle_event(ev, terminal, app, store)?;
+        let now = Instant::now();
+        if needs_draw || now >= next_ui_tick_at {
+            terminal.draw(|frame| render::render_frame(frame, app))?;
+            needs_draw = false;
+            next_ui_tick_at = Instant::now() + UI_TICK_INTERVAL;
         }
 
-        events::refresh_chat_bridge(app, false);
+        let mut poll_timeout = POLL_TIMEOUT;
+        let until_ui_tick = next_ui_tick_at.saturating_duration_since(Instant::now());
+        if until_ui_tick < poll_timeout {
+            poll_timeout = until_ui_tick;
+        }
+
+        if event::poll(poll_timeout)? {
+            let ev = event::read()?;
+            events::handle_event(ev, terminal, app, store)?;
+            needs_draw = true;
+        }
+
+        if app.mode == AppMode::PaneFocus && Instant::now() >= next_pane_focus_refresh_at {
+            events::refresh_selected_preview(app);
+            next_pane_focus_refresh_at = Instant::now() + PANE_FOCUS_REFRESH_INTERVAL;
+            needs_draw = true;
+        }
+
+        if events::refresh_chat_bridge(app, false) {
+            needs_draw = true;
+        }
 
         if Instant::now() >= next_refresh_at {
             app.refresh(store)?;
             events::refresh_selected_preview(app);
             next_refresh_at = Instant::now() + app.options.refresh_interval;
+            needs_draw = true;
         }
     }
 

@@ -3,10 +3,9 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use tinyverse_tui_components::{KeyBind, compact_text as truncate_to, inset_rect};
 
 use crate::app::App;
-
-use crate::runtime::helpers::{inset_rect, key_hint, truncate_to};
 
 pub(super) fn render_chat_composer(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
@@ -88,11 +87,11 @@ pub(super) fn render_chat_composer(frame: &mut Frame, area: Rect, app: &mut App)
         );
     } else {
         let mut hint_spans = Vec::new();
-        hint_spans.extend(key_hint("c", "compose", &app.theme));
+        hint_spans.extend(KeyBind::new("c", "compose").spans(&app.theme));
         hint_spans.push(Span::raw("  "));
-        hint_spans.extend(key_hint("enter", "send", &app.theme));
+        hint_spans.extend(KeyBind::new("enter", "popup").spans(&app.theme));
         hint_spans.push(Span::raw("  "));
-        hint_spans.extend(key_hint("z", "toggle details", &app.theme));
+        hint_spans.extend(KeyBind::new("tab", "focus part").spans(&app.theme));
         frame.render_widget(
             Paragraph::new(Line::from(hint_spans)).style(Style::default().fg(app.theme.text_muted)),
             rows[1],

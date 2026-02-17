@@ -1,5 +1,4 @@
-use std::io::{BufRead, BufReader};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -12,8 +11,7 @@ use crate::chat::{ChatMessage, ChatMessagePart, ChatMessageRole, ChatState};
 use crate::logger::log_line;
 
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:4096";
-const DEFAULT_SYNC_INTERVAL: Duration = Duration::from_secs(4);
-const DEFAULT_EVENT_SYNC_INTERVAL: Duration = Duration::from_millis(250);
+const DEFAULT_SYNC_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatConnectionMode {
@@ -58,17 +56,6 @@ struct OpencodeSnapshot {
     messages: Vec<ChatMessage>,
     models: Vec<String>,
     agents: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-enum RealtimeEvent {
-    Connected,
-    Disconnected,
-    Error(String),
-    Update {
-        event_type: String,
-        session_id: Option<String>,
-    },
 }
 
 #[derive(Debug, Clone)]
@@ -234,6 +221,18 @@ impl OpencodeClient {
         let mut sessions = records
             .into_iter()
             .filter_map(|record| {
+                let record_directory = record
+                    .get("directory")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned);
+                if let Some(directory) = record_directory.as_deref()
+                    && directory != self.directory
+                {
+                    return None;
+                }
+
                 let id = record
                     .get("id")
                     .and_then(Value::as_str)
@@ -253,16 +252,39 @@ impl OpencodeClient {
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .map(ToOwned::to_owned);
-                Some(ChatSessionSummary {
-                    id,
-                    title,
-                    parent_id,
-                })
+                let updated_at = record
+                    .get("time")
+                    .and_then(Value::as_object)
+                    .and_then(|time| {
+                        time.get("updated")
+                            .and_then(Value::as_i64)
+                            .or_else(|| time.get("created").and_then(Value::as_i64))
+                    })
+                    .unwrap_or_default();
+
+                Some((
+                    ChatSessionSummary {
+                        id,
+                        title,
+                        parent_id,
+                    },
+                    updated_at,
+                ))
             })
             .collect::<Vec<_>>();
 
-        sessions.sort_by(|left, right| right.id.cmp(&left.id));
-        Ok(sessions)
+        sessions.sort_by(
+            |(left_summary, left_updated), (right_summary, right_updated)| {
+                right_updated
+                    .cmp(left_updated)
+                    .then_with(|| right_summary.id.cmp(&left_summary.id))
+            },
+        );
+
+        Ok(sessions
+            .into_iter()
+            .map(|(summary, _updated)| summary)
+            .collect())
     }
 
     fn list_messages(&self, session_id: &str) -> Result<Vec<ChatMessage>> {
@@ -460,17 +482,18 @@ impl OpencodeClient {
 
 pub struct ChatBridge {
     opencode: Option<OpencodeClient>,
-    realtime_rx: Option<Receiver<RealtimeEvent>>,
-    realtime_connected: bool,
+    sync_tx: Option<Sender<SyncWorkerCommand>>,
+    sync_rx: Option<Receiver<SyncWorkerEvent>>,
+    sync_in_flight: bool,
+    sync_requested_while_busy: bool,
+    next_sync_request_id: u64,
+    latest_sync_request_id: u64,
     active_session_id: Option<String>,
     known_sessions: Vec<ChatSessionSummary>,
     mode: ChatConnectionMode,
     mode_detail: String,
     last_sync_at: Option<Instant>,
-    last_event_sync_at: Option<Instant>,
-    pending_realtime_refresh: bool,
     sync_interval: Duration,
-    event_sync_interval: Duration,
 }
 
 impl ChatBridge {
@@ -481,7 +504,12 @@ impl ChatBridge {
             .unwrap_or_else(|| String::from("."));
 
         let opencode = OpencodeClient::from_env(directory).ok().flatten();
-        let realtime_rx = opencode.as_ref().map(spawn_realtime_worker);
+        let (sync_tx, sync_rx) = if let Some(opencode) = opencode.as_ref() {
+            let (sync_tx, sync_rx) = spawn_sync_worker(opencode.clone());
+            (Some(sync_tx), Some(sync_rx))
+        } else {
+            (None, None)
+        };
         let mode = if opencode.is_some() {
             ChatConnectionMode::TmuxFallback
         } else {
@@ -490,17 +518,18 @@ impl ChatBridge {
 
         Self {
             opencode,
-            realtime_rx,
-            realtime_connected: false,
+            sync_tx,
+            sync_rx,
+            sync_in_flight: false,
+            sync_requested_while_busy: false,
+            next_sync_request_id: 1,
+            latest_sync_request_id: 0,
             active_session_id: None,
             known_sessions: Vec::new(),
             mode,
             mode_detail: String::from("waiting for sync"),
             last_sync_at: None,
-            last_event_sync_at: None,
-            pending_realtime_refresh: false,
             sync_interval: DEFAULT_SYNC_INTERVAL,
-            event_sync_interval: DEFAULT_EVENT_SYNC_INTERVAL,
         }
     }
 
@@ -519,110 +548,110 @@ impl ChatBridge {
         self.active_session_id.as_deref()
     }
 
-    pub fn set_active_session(&mut self, chat: &mut ChatState, session_id: &str) -> bool {
+    pub fn opencode_base_url(&self) -> Option<String> {
+        self.opencode.as_ref().map(|client| client.base_url.clone())
+    }
+
+    pub fn create_session_for_spawn(
+        &mut self,
+        chat: &mut ChatState,
+        title: &str,
+    ) -> Result<String> {
+        let opencode = self
+            .opencode
+            .as_ref()
+            .context("OpenCode API unavailable for spawn attach")?;
+        let created = opencode.create_session(title)?;
+        self.active_session_id = Some(created.id.clone());
+        self.known_sessions.insert(0, created.clone());
+        self.mode = ChatConnectionMode::OpencodeApi;
+        self.mode_detail = format!("OpenCode session: {}", created.title);
+        chat.clear_messages();
+        self.request_sync(true);
+        Ok(created.id)
+    }
+
+    pub fn set_directory(&mut self, directory: &str) {
+        let Some(current_directory) = self.opencode.as_ref().map(|value| value.directory.clone())
+        else {
+            return;
+        };
+
+        let trimmed = directory.trim();
+        if trimmed.is_empty() || current_directory == trimmed {
+            return;
+        }
+
+        if let Some(opencode) = self.opencode.as_mut() {
+            opencode.directory = trimmed.to_owned();
+        }
+        self.active_session_id = None;
+        self.known_sessions.clear();
+        self.last_sync_at = None;
+        self.sync_requested_while_busy = true;
+        log_line(&format!("chat bridge directory set: {trimmed}"));
+        self.request_sync(true);
+    }
+
+    pub fn set_base_url(&mut self, base_url: &str) {
+        let Some(current_base_url) = self.opencode.as_ref().map(|value| value.base_url.clone())
+        else {
+            return;
+        };
+
+        let trimmed = base_url.trim().trim_end_matches('/');
+        if trimmed.is_empty() || current_base_url == trimmed {
+            return;
+        }
+
+        if let Some(opencode) = self.opencode.as_mut() {
+            opencode.base_url = trimmed.to_owned();
+        }
+        self.active_session_id = None;
+        self.known_sessions.clear();
+        self.last_sync_at = None;
+        self.sync_requested_while_busy = true;
+        log_line(&format!("chat bridge base url set: {trimmed}"));
+        self.request_sync(true);
+    }
+
+    pub fn set_active_session(&mut self, _chat: &mut ChatState, session_id: &str) -> bool {
         let wanted = session_id.trim();
         if wanted.is_empty() {
             return false;
         }
 
-        if !self
-            .known_sessions
-            .iter()
-            .any(|session| session.id == wanted)
-        {
-            return false;
-        }
-
         self.active_session_id = Some(wanted.to_owned());
-        self.sync_now(chat);
+        self.request_sync(true);
         true
     }
 
+    pub fn mark_session_unbound(&mut self, chat: &mut ChatState, detail: &str) {
+        self.active_session_id = None;
+        self.known_sessions.clear();
+        self.sync_in_flight = false;
+        self.sync_requested_while_busy = false;
+        self.last_sync_at = None;
+        self.mode = ChatConnectionMode::TmuxFallback;
+        self.mode_detail = detail.to_owned();
+        chat.clear_messages();
+    }
+
     pub fn sync_if_due(&mut self, chat: &mut ChatState) {
-        if self.consume_realtime_events() {
-            self.pending_realtime_refresh = true;
-        }
+        self.consume_sync_events(chat);
 
-        if self.pending_realtime_refresh {
-            let ready_for_event_sync = self
-                .last_event_sync_at
-                .map(|instant| instant.elapsed() >= self.event_sync_interval)
-                .unwrap_or(true);
-
-            if ready_for_event_sync {
-                self.last_event_sync_at = Some(Instant::now());
-                self.pending_realtime_refresh = false;
-                self.sync_now(chat);
-            }
+        if self.sync_requested_while_busy && !self.sync_in_flight {
+            self.sync_requested_while_busy = false;
+            self.request_sync(true);
             return;
         }
 
-        if self
-            .last_sync_at
-            .map(|instant| instant.elapsed() < self.sync_interval)
-            .unwrap_or(false)
-        {
-            return;
-        }
-        self.sync_now(chat);
+        self.request_sync(false);
     }
 
     pub fn sync_now(&mut self, chat: &mut ChatState) {
-        self.last_sync_at = Some(Instant::now());
-        let Some(opencode) = self.opencode.as_ref() else {
-            self.mode = ChatConnectionMode::Offline;
-            self.mode_detail = String::from("OpenCode API disabled");
-            self.known_sessions.clear();
-            return;
-        };
-
-        let sync_result = (|| -> Result<OpencodeSnapshot> {
-            opencode.health()?;
-            let mut snapshot = opencode.snapshot(self.active_session_id.as_deref())?;
-            if snapshot.active_session_id.is_none() {
-                let created = opencode.create_session("tinyverse chat")?;
-                snapshot.sessions.insert(0, created.clone());
-                snapshot.active_session_id = Some(created.id.clone());
-                snapshot.messages = opencode.list_messages(&created.id)?;
-            }
-            Ok(snapshot)
-        })();
-
-        match sync_result {
-            Ok(snapshot) => {
-                let previous_session = self.active_session_id.clone();
-                self.active_session_id = snapshot.active_session_id;
-                self.known_sessions = snapshot.sessions.clone();
-                chat.set_models(snapshot.models);
-                chat.set_agents(snapshot.agents);
-                chat.set_messages(snapshot.messages);
-                let session_label = snapshot
-                    .sessions
-                    .iter()
-                    .find(|session| self.active_session_id.as_deref() == Some(session.id.as_str()))
-                    .map(|session| session.title.clone())
-                    .unwrap_or_else(|| String::from("unknown"));
-                self.mode = ChatConnectionMode::OpencodeApi;
-                self.mode_detail = if self.realtime_connected {
-                    format!("OpenCode session: {session_label} (sse)")
-                } else {
-                    format!("OpenCode session: {session_label}")
-                };
-
-                if previous_session != self.active_session_id {
-                    log_line(&format!(
-                        "chat bridge session switched: {:?} -> {:?}",
-                        previous_session, self.active_session_id
-                    ));
-                }
-            }
-            Err(error) => {
-                self.mode = ChatConnectionMode::TmuxFallback;
-                let summary = summarize_bridge_error(&error);
-                self.mode_detail = format!("OpenCode unavailable: {summary}");
-                log_line(&format!("chat bridge sync error: {error:#}"));
-            }
-        }
+        self.consume_sync_events(chat);
+        self.request_sync(true);
     }
 
     pub fn send_prompt(
@@ -653,6 +682,8 @@ impl ChatBridge {
             Ok(()) => {
                 self.mode = ChatConnectionMode::OpencodeApi;
                 self.mode_detail = String::from("prompt sent via OpenCode API");
+                self.sync_requested_while_busy = true;
+                self.request_sync(true);
                 DispatchOutcome {
                     via_opencode: true,
                     detail: String::from("Prompt sent via OpenCode API"),
@@ -662,8 +693,8 @@ impl ChatBridge {
                 self.mode = ChatConnectionMode::TmuxFallback;
                 if is_session_missing_error(&error) {
                     self.active_session_id = None;
-                    self.pending_realtime_refresh = true;
                     self.last_sync_at = None;
+                    self.sync_requested_while_busy = true;
                 }
                 let summary = summarize_bridge_error(&error);
                 self.mode_detail = format!("OpenCode send failed: {summary}");
@@ -675,236 +706,194 @@ impl ChatBridge {
             }
         }
     }
-}
 
-fn spawn_realtime_worker(opencode: &OpencodeClient) -> Receiver<RealtimeEvent> {
-    let (tx, rx) = channel();
-    let client = opencode.clone();
-
-    thread::spawn(move || {
-        let mut backoff = Duration::from_secs(2);
-        loop {
-            match stream_realtime_once(&client, &tx) {
-                Ok(()) => {
-                    let _ = tx.send(RealtimeEvent::Disconnected);
-                    backoff = Duration::from_secs(2);
-                }
-                Err(error) => {
-                    let _ = tx.send(RealtimeEvent::Error(error.to_string()));
-                }
-            }
-            thread::sleep(backoff);
-            backoff = (backoff * 2).min(Duration::from_secs(30));
-        }
-    });
-
-    rx
-}
-
-fn stream_realtime_once(opencode: &OpencodeClient, tx: &Sender<RealtimeEvent>) -> Result<()> {
-    let mut request = opencode
-        .http
-        .request(Method::GET, format!("{}/event", opencode.base_url))
-        .query(&[("directory", &opencode.directory)])
-        .header(reqwest::header::ACCEPT, "text/event-stream");
-
-    if let Some(password) = opencode.password.as_ref() {
-        request = request.basic_auth(&opencode.username, Some(password));
-    }
-
-    let response = request.send().context("OpenCode realtime connect failed")?;
-    if !response.status().is_success() {
-        bail!("OpenCode realtime status {}", response.status().as_u16());
-    }
-
-    let _ = tx.send(RealtimeEvent::Connected);
-
-    let mut reader = BufReader::new(response);
-    let mut line = String::new();
-    let mut current_event_type: Option<String> = None;
-    let mut current_data = String::new();
-
-    loop {
-        line.clear();
-        let bytes_read = reader
-            .read_line(&mut line)
-            .context("OpenCode realtime read failed")?;
-        if bytes_read == 0 {
-            break;
+    fn request_sync(&mut self, force: bool) {
+        if self.opencode.is_none() {
+            self.mode = ChatConnectionMode::Offline;
+            self.mode_detail = String::from("OpenCode API disabled");
+            self.known_sessions.clear();
+            return;
         }
 
-        while line.ends_with('\n') || line.ends_with('\r') {
-            line.pop();
+        if self.sync_in_flight {
+            self.sync_requested_while_busy = true;
+            return;
         }
 
-        if line.is_empty() {
-            dispatch_realtime_event(
-                tx,
-                current_event_type.take(),
-                std::mem::take(&mut current_data),
-            );
-            continue;
+        if !force
+            && self
+                .last_sync_at
+                .map(|instant| instant.elapsed() < self.sync_interval)
+                .unwrap_or(false)
+        {
+            return;
         }
 
-        if line.starts_with(':') {
-            continue;
-        }
-
-        if let Some(value) = line.strip_prefix("event:") {
-            current_event_type = Some(value.trim().to_owned());
-            continue;
-        }
-
-        if let Some(value) = line.strip_prefix("data:") {
-            if !current_data.is_empty() {
-                current_data.push('\n');
-            }
-            current_data.push_str(value.trim_start());
-        }
-    }
-
-    if !current_data.trim().is_empty() || current_event_type.is_some() {
-        dispatch_realtime_event(tx, current_event_type.take(), current_data);
-    }
-
-    Ok(())
-}
-
-fn dispatch_realtime_event(
-    tx: &Sender<RealtimeEvent>,
-    current_event_type: Option<String>,
-    current_data: String,
-) {
-    if current_event_type.is_none() && current_data.trim().is_empty() {
-        return;
-    }
-
-    let payload = serde_json::from_str::<Value>(&current_data).ok();
-    let event_type = payload
-        .as_ref()
-        .and_then(|value| value.get("type"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-        .or_else(|| current_event_type)
-        .unwrap_or_else(|| String::from("event.unknown"));
-    let session_id = payload
-        .as_ref()
-        .and_then(|value| extract_session_id_for_event(value, &event_type));
-
-    let _ = tx.send(RealtimeEvent::Update {
-        event_type,
-        session_id,
-    });
-}
-
-impl ChatBridge {
-    fn consume_realtime_events(&mut self) -> bool {
-        let Some(rx) = self.realtime_rx.as_ref() else {
-            return false;
+        let Some(opencode) = self.opencode.as_ref() else {
+            return;
+        };
+        let Some(sync_tx) = self.sync_tx.as_ref() else {
+            self.mode = ChatConnectionMode::TmuxFallback;
+            self.mode_detail = String::from("sync worker unavailable");
+            return;
         };
 
-        let mut needs_refresh = false;
+        let request_id = self.next_sync_request_id;
+        self.next_sync_request_id = self.next_sync_request_id.saturating_add(1);
+        self.latest_sync_request_id = request_id;
+
+        let send_result = sync_tx.send(SyncWorkerCommand::Sync {
+            request_id,
+            directory: opencode.directory.clone(),
+            preferred_session_id: self.active_session_id.clone(),
+        });
+
+        match send_result {
+            Ok(()) => {
+                self.sync_in_flight = true;
+                self.last_sync_at = Some(Instant::now());
+            }
+            Err(error) => {
+                self.sync_in_flight = false;
+                self.mode = ChatConnectionMode::TmuxFallback;
+                self.mode_detail = format!(
+                    "sync worker failed: {}",
+                    truncate_error_label(&error.to_string())
+                );
+                log_line(&format!("chat bridge sync worker send error: {error}"));
+            }
+        }
+    }
+
+    fn consume_sync_events(&mut self, chat: &mut ChatState) {
+        let Some(sync_rx) = self.sync_rx.as_ref() else {
+            return;
+        };
+
         loop {
-            match rx.try_recv() {
-                Ok(RealtimeEvent::Connected) => {
-                    self.realtime_connected = true;
-                    log_line("chat bridge realtime connected");
-                }
-                Ok(RealtimeEvent::Disconnected) => {
-                    self.realtime_connected = false;
-                    self.pending_realtime_refresh = true;
-                    log_line("chat bridge realtime disconnected");
-                }
-                Ok(RealtimeEvent::Error(error)) => {
-                    let was_connected = self.realtime_connected;
-                    self.realtime_connected = false;
-                    if was_connected {
-                        self.mode_detail =
-                            format!("OpenCode realtime error: {}", truncate_error_label(&error));
-                        log_line(&format!("chat bridge realtime error: {error}"));
+            match sync_rx.try_recv() {
+                Ok(SyncWorkerEvent::Synced { request_id, result }) => {
+                    self.sync_in_flight = false;
+                    if request_id != self.latest_sync_request_id {
+                        continue;
                     }
-                }
-                Ok(RealtimeEvent::Update {
-                    event_type,
-                    session_id,
-                }) => {
-                    if event_requires_refresh(
-                        &event_type,
-                        session_id.as_deref(),
-                        self.active_session_id.as_deref(),
-                    ) {
-                        needs_refresh = true;
+                    match result {
+                        Ok(snapshot) => {
+                            let previous_session = self.active_session_id.clone();
+                            self.active_session_id = snapshot.active_session_id;
+                            self.known_sessions = if let Some(active_id) = self.active_session_id.as_deref() {
+                                snapshot
+                                    .sessions
+                                    .iter()
+                                    .filter(|session| session.id == active_id)
+                                    .cloned()
+                                    .collect()
+                            } else {
+                                snapshot.sessions.clone()
+                            };
+                            chat.set_models(snapshot.models);
+                            chat.set_agents(snapshot.agents);
+                            chat.set_messages(snapshot.messages);
+                            let session_label = snapshot
+                                .sessions
+                                .iter()
+                                .find(|session| {
+                                    self.active_session_id.as_deref() == Some(session.id.as_str())
+                                })
+                                .map(|session| session.title.clone())
+                                .unwrap_or_else(|| String::from("unknown"));
+                            self.mode = ChatConnectionMode::OpencodeApi;
+                            self.mode_detail = format!("OpenCode session: {session_label}");
+
+                            if previous_session != self.active_session_id {
+                                log_line(&format!(
+                                    "chat bridge session switched: {:?} -> {:?}",
+                                    previous_session, self.active_session_id
+                                ));
+                            }
+                        }
+                        Err(error_text) => {
+                            self.mode = ChatConnectionMode::TmuxFallback;
+                            let summary = summarize_bridge_error_text(&error_text);
+                            self.mode_detail = format!("OpenCode unavailable: {summary}");
+                            log_line(&format!("chat bridge sync error: {error_text}"));
+                        }
                     }
                 }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => {
-                    self.realtime_connected = false;
+                    self.sync_in_flight = false;
+                    self.mode = ChatConnectionMode::TmuxFallback;
+                    self.mode_detail = String::from("sync worker disconnected");
                     break;
                 }
             }
         }
-
-        needs_refresh
     }
 }
 
-fn event_requires_refresh(
-    event_type: &str,
-    session_id: Option<&str>,
-    active_session_id: Option<&str>,
-) -> bool {
-    if (event_type.starts_with("message.")
-        || event_type.starts_with("permission.")
-        || event_type.starts_with("question."))
-        && let Some(session_id) = session_id
-        && Some(session_id) != active_session_id
-    {
-        return false;
-    }
-
-    event_type.starts_with("message.")
-        || event_type.starts_with("session.")
-        || event_type.starts_with("permission.")
-        || event_type.starts_with("question.")
-        || event_type == "server.connected"
+#[derive(Debug)]
+enum SyncWorkerCommand {
+    Sync {
+        request_id: u64,
+        directory: String,
+        preferred_session_id: Option<String>,
+    },
 }
 
-fn extract_session_id_for_event(value: &Value, event_type: &str) -> Option<String> {
-    if let Some(session) = value.get("session") {
-        if let Some(id) = session.get("id").and_then(Value::as_str) {
-            return Some(id.to_owned());
-        }
-        if let Some(id) = session.as_str() {
-            return Some(id.to_owned());
-        }
-    }
+#[derive(Debug)]
+enum SyncWorkerEvent {
+    Synced {
+        request_id: u64,
+        result: Result<OpencodeSnapshot, String>,
+    },
+}
 
-    const POINTERS: [&str; 8] = [
-        "/sessionID",
-        "/sessionId",
-        "/session_id",
-        "/properties/sessionID",
-        "/properties/sessionId",
-        "/properties/session_id",
-        "/data/sessionID",
-        "/data/sessionId",
-    ];
-    for pointer in POINTERS {
-        if let Some(id) = value.pointer(pointer).and_then(Value::as_str) {
-            return Some(id.to_owned());
-        }
-    }
+fn spawn_sync_worker(
+    opencode: OpencodeClient,
+) -> (Sender<SyncWorkerCommand>, Receiver<SyncWorkerEvent>) {
+    let (command_tx, command_rx) = mpsc::channel::<SyncWorkerCommand>();
+    let (event_tx, event_rx) = mpsc::channel::<SyncWorkerEvent>();
 
-    if event_type.starts_with("session.") {
-        if let Some(id) = value.get("id").and_then(Value::as_str) {
-            return Some(id.to_owned());
+    thread::spawn(move || {
+        let mut opencode = opencode;
+        while let Ok(command) = command_rx.recv() {
+            match command {
+                SyncWorkerCommand::Sync {
+                    request_id,
+                    directory,
+                    preferred_session_id,
+                } => {
+                    opencode.directory = directory;
+                    let result = sync_snapshot_once(&opencode, preferred_session_id.as_deref())
+                        .map_err(|error| format!("{error:#}"));
+                    if event_tx
+                        .send(SyncWorkerEvent::Synced { request_id, result })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
         }
-        if let Some(id) = value.pointer("/properties/id").and_then(Value::as_str) {
-            return Some(id.to_owned());
-        }
-    }
+    });
 
-    None
+    (command_tx, event_rx)
+}
+
+fn sync_snapshot_once(
+    opencode: &OpencodeClient,
+    preferred_session_id: Option<&str>,
+) -> Result<OpencodeSnapshot> {
+    opencode.health()?;
+    let mut snapshot = opencode.snapshot(preferred_session_id)?;
+    if snapshot.active_session_id.is_none() {
+        let created = opencode.create_session("tinyverse chat")?;
+        snapshot.sessions.insert(0, created.clone());
+        snapshot.active_session_id = Some(created.id.clone());
+        snapshot.messages = opencode.list_messages(&created.id)?;
+    }
+    Ok(snapshot)
 }
 
 fn unwrap_data(value: Value) -> Value {
@@ -933,7 +922,11 @@ fn is_session_missing_error(error: &anyhow::Error) -> bool {
 }
 
 fn summarize_bridge_error(error: &anyhow::Error) -> String {
-    let root = error.root_cause().to_string();
+    summarize_bridge_error_text(&error.root_cause().to_string())
+}
+
+fn summarize_bridge_error_text(error_text: &str) -> String {
+    let root = error_text.trim();
     let lower = root.to_ascii_lowercase();
     if lower.contains("refused") || lower.contains("connect") {
         return String::from("server unreachable");
@@ -945,7 +938,7 @@ fn summarize_bridge_error(error: &anyhow::Error) -> String {
         return String::from("endpoint not found");
     }
 
-    truncate_error_label(&root)
+    truncate_error_label(root)
 }
 
 fn truncate_error_label(value: &str) -> String {

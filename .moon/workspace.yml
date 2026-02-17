@@ -5,6 +5,7 @@ projects:
   tinyverse_cli: "tinyverse_cli"
   tinyverse_ui: "tinyverse_ui"
   tinyverse_tui: "tinyverse_tui"
+  tinyverse_tui_components: "tinyverse_tui_components"
 
 vcs:
   manager: "git"

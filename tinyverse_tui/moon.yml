@@ -5,6 +5,7 @@ stack: "backend"
 type: "library"
 dependsOn:
   - "tinyverse_lib"
+  - "tinyverse_tui_components"
 
 tasks:
   install:

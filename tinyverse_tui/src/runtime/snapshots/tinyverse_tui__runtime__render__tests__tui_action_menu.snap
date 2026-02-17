@@ -5,8 +5,8 @@ expression: snapshot
 tinyverse tui  |  1 session(s)
 ╭ Sessions ──────────────────────────────────────────────────────────╮╭ Console ───────────────────────────────────────╮
 │                                                                    ││ 1  Cons   2  Agent   3  Chat                   │
-│  Graph   Tree                                                      ││Loading console preview...                      │
-│  ┌ tinyverse_alpha ────────────────────────────────────────── X ┐  ││                                                │
+│  Graph   Tree                                                      ││ Console   snapshot  tinyverse_alpha            │
+│  ┌ tinyverse_alpha ────────────────────────────────────────── X ┐  ││Loading console preview...                      │
 │  │  active   opencode                                           │  ││                                                │
 │  │  openai/gpt-5.3-codex   0 msgs                               │  ││                                                │
 │  │                                                              │  ││                                                │
@@ -20,13 +20,13 @@ tinyverse tui  |  1 session(s)
 │                                     │ a  Attach selected session               │                                     │
 │                                     │ c  Send command to console pane          │                                     │
 │                                     │ ───────────────────────────────────────  │                                     │
-│                                     │ x  Kill selected session                 │                                     │
-│                                     │ k  Kill all sessions                     │                                     │
-│                                     │ q Close menu                             │                                     │
-│                                     │                                          │                                     │
-│                                     │                                          │                                     │
-│                                     ╰──────────────────────────────────────────╯                                     │
-│                                                                    ││                                                │
+│  ┌ Threads (0) ─────────────────────│ x  Kill selected session                 │                                     │
+│  │ No chat threads for selected sess│ k  Kill all sessions                     │                                     │
+│  │                                  │ q Close menu                             │                                     │
+│  │                                  │                                          │                                     │
+│  │                                  │                                          │                                     │
+│  │                                  ╰──────────────────────────────────────────╯                                     │
+│  └──────────────────────────────────────────────────────────────┘  ││                                                │
 │                                                                    ││                                                │
 ╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭ Inspector ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮

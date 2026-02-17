@@ -1,16 +1,18 @@
 use std::io;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
-use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tinyverse_lib::{
     CapturePaneOptions, CreateSessionInput, PaneTarget, PanelRole, SendKeysOptions, SessionStore,
-    SessionTarget, SpawnSessionOptions, TmuxClient, load_tmux_spawn_layout, resolve_session_name,
-    strip_ansi_and_controls,
+    SessionTarget, SpawnSessionOptions, StoredSession, TmuxClient, load_tmux_spawn_layout,
+    resolve_session_name,
 };
 
 use crate::app::{
@@ -19,10 +21,12 @@ use crate::app::{
 };
 use crate::chat::ChatMessageRole;
 use crate::prefs::{self, TuiPrefs};
+use tinyverse_tui_components::rect_contains;
 
-use super::helpers::rect_contains;
 use super::render;
 use super::{restore_terminal, setup_terminal};
+
+const CHAT_HINT_REFRESH_INTERVAL: Duration = Duration::from_secs(3);
 
 pub(crate) fn handle_event(
     event: Event,
@@ -32,7 +36,7 @@ pub(crate) fn handle_event(
 ) -> Result<()> {
     match event {
         Event::Key(key) if key.kind == KeyEventKind::Press => {
-            handle_key_event(key.code, terminal, app, store)?
+            handle_key_event(key, terminal, app, store)?
         }
         Event::Mouse(mouse) => handle_mouse_event(mouse, terminal, app, store)?,
         Event::Resize(_, _) => {
@@ -45,26 +49,329 @@ pub(crate) fn handle_event(
     Ok(())
 }
 
-pub(crate) fn refresh_chat_bridge(app: &mut App, force: bool) {
+pub(crate) fn refresh_chat_bridge(app: &mut App, force: bool) -> bool {
+    let before_active_session_id = app.chat_bridge.active_session_id().map(ToOwned::to_owned);
+    let before_known_session_count = app.chat_bridge.sessions().len();
+    let before_status = app.chat_bridge.status();
+    let before_message_count = app.chat.messages.len();
+
+    let selected_session_key = app
+        .selected_session()
+        .map(|session| session.session_key.clone());
+    let has_pinned_spawn_session = selected_session_key
+        .as_deref()
+        .and_then(|key| app.spawned_chat_session_ids.get(key))
+        .is_some();
+    let should_refresh_hints = force
+        || selected_session_key != app.chat_hint_session_key
+        || (!has_pinned_spawn_session
+            && app
+                .chat_hint_refreshed_at
+                .map(|instant| instant.elapsed() >= CHAT_HINT_REFRESH_INTERVAL)
+                .unwrap_or(true));
+
+    if should_refresh_hints {
+        app.chat_hint_directory = preferred_chat_directory_for_selected_session(app);
+        app.chat_hint_base_url = preferred_chat_base_url_for_selected_session(app);
+        app.chat_hint_session_id = preferred_chat_session_id_for_selected_session(app);
+        app.chat_hint_session_key = selected_session_key;
+        app.chat_hint_refreshed_at = Some(Instant::now());
+    }
+
+    if let Some(directory) = app.chat_hint_directory.as_deref() {
+        app.chat_bridge.set_directory(directory);
+    }
+
+    if let Some(base_url) = app.chat_hint_base_url.as_deref() {
+        app.chat_bridge.set_base_url(base_url);
+    }
+
+    if let Some(preferred_session_id) = app.chat_hint_session_id.as_deref() {
+        let current_session_id = app.chat_bridge.active_session_id();
+        if current_session_id != Some(preferred_session_id) {
+            app.chat_bridge
+                .set_active_session(&mut app.chat, preferred_session_id);
+        }
+    }
+
     if force {
         app.chat_bridge.sync_now(&mut app.chat);
     } else {
         app.chat_bridge.sync_if_due(&mut app.chat);
     }
-    app.sync_tree_cursor_to_active_target();
+
+    let after_active_session_id = app.chat_bridge.active_session_id().map(ToOwned::to_owned);
+    let after_known_session_count = app.chat_bridge.sessions().len();
+    let after_status = app.chat_bridge.status();
+    let after_message_count = app.chat.messages.len();
+
+    let bridge_changed = before_active_session_id != after_active_session_id
+        || before_known_session_count != after_known_session_count
+        || before_status.mode != after_status.mode
+        || before_status.detail != after_status.detail
+        || before_message_count != after_message_count;
+
+    if bridge_changed || force {
+        if app.sessions_view_mode == SessionsViewMode::Tree {
+            app.rebuild_tree_rows_preserving_cursor();
+        } else {
+            app.sync_tree_cursor_to_active_target();
+        }
+    }
+
+    bridge_changed
 }
 
+fn preferred_chat_directory_for_selected_session(app: &App) -> Option<String> {
+    let session = app.selected_session()?;
+    let pane_candidates = [
+        session.agent_pane_id.as_deref(),
+        session.console_pane_id.as_deref(),
+    ];
+
+    pane_candidates
+        .into_iter()
+        .flatten()
+        .find_map(resolve_pane_current_path)
+}
+
+fn resolve_pane_current_path(pane_id: &str) -> Option<String> {
+    let pane_id = pane_id.trim();
+    if pane_id.is_empty() {
+        return None;
+    }
+
+    let output = Command::new("tmux")
+        .args([
+            "display-message",
+            "-p",
+            "-t",
+            pane_id,
+            "#{pane_current_path}",
+        ])
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if path.is_empty() { None } else { Some(path) }
+}
+
+fn preferred_chat_session_id_for_selected_session(app: &App) -> Option<String> {
+    let session = app.selected_session()?;
+    if let Some(pinned) = app.spawned_chat_session_ids.get(&session.session_key) {
+        return Some(pinned.clone());
+    }
+
+    resolve_chat_session_id_from_agent_process(session)
+}
+
+fn preferred_chat_base_url_for_selected_session(app: &App) -> Option<String> {
+    let session = app.selected_session()?;
+    let pane_id = session.agent_pane_id.as_deref()?.trim();
+    if pane_id.is_empty() {
+        return None;
+    }
+
+    let pane_pid = pane_pid_for(pane_id)?;
+    let candidate_pids = collect_process_tree_pids(&pane_pid);
+    let mut commands = candidate_pids
+        .iter()
+        .filter_map(|pid| command_with_env_for_pid(pid).map(|command| (pid.as_str(), command)))
+        .collect::<Vec<_>>();
+
+    commands.sort_by_key(|(pid, command)| {
+        let is_opencode = command.contains("/opencode") || command.contains(" opencode");
+        (!is_opencode, *pid)
+    });
+
+    for (_pid, command) in commands {
+        if let Some(port) = extract_opencode_port_from_command(&command) {
+            return Some(format!("http://127.0.0.1:{port}"));
+        }
+    }
+
+    None
+}
+
+fn resolve_chat_session_id_from_agent_process(session: &StoredSession) -> Option<String> {
+    let pane_id = session.agent_pane_id.as_deref()?.trim();
+    if pane_id.is_empty() {
+        return None;
+    }
+
+    let Some(pane_pid) = pane_pid_for(pane_id) else {
+        return None;
+    };
+
+    let candidate_pids = collect_process_tree_pids(&pane_pid);
+    let mut commands = candidate_pids
+        .iter()
+        .filter_map(|pid| command_with_env_for_pid(pid).map(|command| (pid.as_str(), command)))
+        .collect::<Vec<_>>();
+
+    commands.sort_by_key(|(pid, command)| {
+        let is_opencode = command.contains("/opencode") || command.contains(" opencode");
+        (!is_opencode, *pid)
+    });
+
+    for (_pid, command) in commands {
+        if let Some(session_id) = extract_any_chat_session_env(&command) {
+            return Some(session_id);
+        }
+    }
+
+    None
+}
+
+fn pane_pid_for(pane_id: &str) -> Option<String> {
+    let output = Command::new("tmux")
+        .args(["display-message", "-p", "-t", pane_id, "#{pane_pid}"])
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let pane_pid = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!pane_pid.is_empty()).then_some(pane_pid)
+}
+
+fn collect_process_tree_pids(root_pid: &str) -> Vec<String> {
+    let mut out = vec![root_pid.to_owned()];
+    let mut cursor = 0usize;
+    while cursor < out.len() {
+        let parent = out[cursor].clone();
+        cursor += 1;
+
+        let children = child_pids(&parent);
+        for child in children {
+            if !out.contains(&child) {
+                out.push(child);
+            }
+        }
+    }
+
+    out
+}
+
+fn child_pids(parent_pid: &str) -> Vec<String> {
+    let output = Command::new("pgrep")
+        .args(["-P", parent_pid])
+        .stdin(Stdio::null())
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn command_with_env_for_pid(pid: &str) -> Option<String> {
+    let output = Command::new("ps")
+        .args(["eww", "-p", pid, "-o", "command="])
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let command = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!command.is_empty()).then_some(command)
+}
+
+fn extract_any_chat_session_env(command: &str) -> Option<String> {
+    extract_env_value(command, "OPENCODE_SESSION_ID")
+        .or_else(|| extract_env_value(command, "OPENCODE_SESSION"))
+        .or_else(|| extract_env_value(command, "DARK_CHAT_SESSION_ID"))
+        .or_else(|| extract_session_id_from_command_args(command))
+}
+
+fn extract_opencode_port_from_command(command: &str) -> Option<u16> {
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    let is_opencode_command = tokens
+        .iter()
+        .any(|token| token.contains("opencode") && !token.starts_with("OPENCODE_"));
+    if !is_opencode_command {
+        return None;
+    }
+
+    for (index, token) in tokens.iter().enumerate() {
+        if let Some(value) = token.strip_prefix("--port=")
+            && let Ok(port) = value.trim().parse::<u16>()
+            && port > 0
+        {
+            return Some(port);
+        }
+
+        if *token == "--port"
+            && let Some(value) = tokens.get(index + 1)
+            && let Ok(port) = value.trim().parse::<u16>()
+            && port > 0
+        {
+            return Some(port);
+        }
+    }
+
+    None
+}
+
+fn extract_session_id_from_command_args(command: &str) -> Option<String> {
+    let tokens = command.split_whitespace().collect::<Vec<_>>();
+    for (index, token) in tokens.iter().enumerate() {
+        if let Some(value) = token.strip_prefix("--session=")
+            && !value.trim().is_empty()
+        {
+            return Some(value.trim().to_owned());
+        }
+
+        if (*token == "--session" || *token == "-s")
+            && let Some(value) = tokens.get(index + 1)
+            && !value.starts_with('-')
+            && !value.trim().is_empty()
+        {
+            return Some(value.trim().to_owned());
+        }
+    }
+
+    None
+}
+
+fn extract_env_value(command: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    command
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix(&prefix).map(ToOwned::to_owned))
+        .filter(|value| !value.trim().is_empty())
+}
+
+const DOUBLE_ESC_WINDOW_MS: u128 = 400;
+
 fn handle_key_event(
-    key: KeyCode,
+    key: KeyEvent,
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     store: &mut SessionStore,
 ) -> Result<()> {
     match app.mode {
-        AppMode::Normal => match key {
+        AppMode::PaneFocus => handle_pane_focus_key(key, app),
+        AppMode::Normal => match key.code {
             _ if app.sidebar_tab == SidebarTab::Chat
                 && app.sessions_view_mode != SessionsViewMode::Tree
-                && handle_chat_key_event(key, app, store)? => {}
+                && handle_chat_key_event(key.code, app, store)? => {}
             KeyCode::Esc | KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Up | KeyCode::Char('k') => {
                 if app.sessions_view_mode == SessionsViewMode::Tree {
@@ -112,6 +419,7 @@ fn handle_key_event(
             KeyCode::Char('1') => app.set_sidebar_tab(SidebarTab::Console),
             KeyCode::Char('2') => app.set_sidebar_tab(SidebarTab::Agent),
             KeyCode::Char('3') => app.set_sidebar_tab(SidebarTab::Chat),
+            KeyCode::Char('f') => enter_pane_focus(app),
             KeyCode::Enter => {
                 if app.sessions_view_mode == SessionsViewMode::Tree {
                     app.activate_tree_cursor();
@@ -134,7 +442,7 @@ fn handle_key_event(
             }
             _ => {}
         },
-        AppMode::ActionMenu => match key {
+        AppMode::ActionMenu => match key.code {
             KeyCode::Esc | KeyCode::Char('q') => app.close_action_menu(),
             KeyCode::Up | KeyCode::Char('k') => app.action_menu_prev(),
             KeyCode::Down | KeyCode::Char('j') => app.action_menu_next(),
@@ -148,7 +456,7 @@ fn handle_key_event(
             }
             _ => {}
         },
-        AppMode::ConfirmKill => match key {
+        AppMode::ConfirmKill => match key.code {
             KeyCode::Esc | KeyCode::Char('n') => {
                 app.mode = AppMode::ActionMenu;
                 app.status_message = String::from("Kill canceled");
@@ -159,7 +467,7 @@ fn handle_key_event(
             }
             _ => {}
         },
-        AppMode::ConfirmKillAll => match key {
+        AppMode::ConfirmKillAll => match key.code {
             KeyCode::Esc | KeyCode::Char('n') => {
                 app.mode = AppMode::ActionMenu;
                 app.status_message = String::from("Kill all canceled");
@@ -170,7 +478,7 @@ fn handle_key_event(
             }
             _ => {}
         },
-        AppMode::SendInput => match key {
+        AppMode::SendInput => match key.code {
             KeyCode::Esc => {
                 app.mode = AppMode::Normal;
                 app.input_buffer.clear();
@@ -182,7 +490,7 @@ fn handle_key_event(
             KeyCode::Char(c) => app.input_buffer.push(c),
             _ => {}
         },
-        AppMode::SpawnInput => match key {
+        AppMode::SpawnInput => match key.code {
             KeyCode::Esc => {
                 app.mode = AppMode::Normal;
                 app.reset_spawn_form();
@@ -197,10 +505,6 @@ fn handle_key_event(
             KeyCode::Char(c) => app.spawn_form.active_field_mut().push(c),
             _ => {}
         },
-    }
-
-    if app.mode == AppMode::Normal {
-        refresh_selected_preview(app);
     }
 
     Ok(())
@@ -307,6 +611,22 @@ fn handle_mouse_event(
         return Ok(());
     }
 
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        && let Some(header_rect) = app.layout.sessions_header_rect
+        && rect_contains(header_rect, x, y)
+    {
+        app.toggle_sessions_minimized();
+        return Ok(());
+    }
+
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        && let Some(header_rect) = app.layout.sidebar_header_rect
+        && rect_contains(header_rect, x, y)
+    {
+        app.toggle_sidebar_minimized();
+        return Ok(());
+    }
+
     if app.sidebar_tab == SidebarTab::Chat && handle_chat_mouse_event(mouse, app)? {
         return Ok(());
     }
@@ -405,14 +725,10 @@ fn handle_mouse_event(
 fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) -> Result<bool> {
     if app.chat.is_detail_modal_open() {
         match key {
-            KeyCode::Esc | KeyCode::Enter => {
+            KeyCode::Enter | KeyCode::Char('q') => {
                 app.chat.close_detail_modal();
-                app.status_message = String::from("Detail view closed");
+                app.status_message = String::from("Detail popup closed");
             }
-            KeyCode::Up | KeyCode::Char('k') => app.chat.detail_scroll_up(2),
-            KeyCode::Down | KeyCode::Char('j') => app.chat.detail_scroll_down(2),
-            KeyCode::PageUp => app.chat.detail_scroll_up(8),
-            KeyCode::PageDown => app.chat.detail_scroll_down(8),
             _ => {}
         }
         return Ok(true);
@@ -420,10 +736,6 @@ fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) 
 
     if app.chat.is_model_selector_open() {
         match key {
-            KeyCode::Esc => {
-                app.chat.close_model_selector();
-                app.status_message = String::from("Model selector closed");
-            }
             KeyCode::Tab => {
                 app.chat.model_selector_toggle_raw_mode();
                 app.status_message = if app.chat.model_selector.raw_mode {
@@ -432,8 +744,8 @@ fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) 
                     String::from("Model selector filter mode")
                 };
             }
-            KeyCode::Up | KeyCode::Char('k') => app.chat.model_selector_move_up(),
-            KeyCode::Down | KeyCode::Char('j') => app.chat.model_selector_move_down(),
+            KeyCode::Up => app.chat.model_selector_move_up(),
+            KeyCode::Down => app.chat.model_selector_move_down(),
             KeyCode::Backspace => app.chat.model_selector_backspace(),
             KeyCode::Enter => {
                 if let Some(selected) = app.chat.confirm_model_selector() {
@@ -451,12 +763,8 @@ fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) 
 
     if app.chat.is_agent_selector_open() {
         match key {
-            KeyCode::Esc => {
-                app.chat.close_agent_selector();
-                app.status_message = String::from("Agent selector closed");
-            }
-            KeyCode::Up | KeyCode::Char('k') => app.chat.agent_selector_move_up(),
-            KeyCode::Down | KeyCode::Char('j') => app.chat.agent_selector_move_down(),
+            KeyCode::Up => app.chat.agent_selector_move_up(),
+            KeyCode::Down => app.chat.agent_selector_move_down(),
             KeyCode::Backspace => app.chat.agent_selector_backspace(),
             KeyCode::Enter => {
                 if let Some(selected) = app.chat.confirm_agent_selector() {
@@ -474,11 +782,8 @@ fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) 
 
     if app.chat.is_autocomplete_open() {
         match key {
-            KeyCode::Esc => {
-                app.chat.close_autocomplete();
-            }
-            KeyCode::Up | KeyCode::Char('k') => app.chat.autocomplete_move_up(),
-            KeyCode::Down | KeyCode::Char('j') => app.chat.autocomplete_move_down(),
+            KeyCode::Up => app.chat.autocomplete_move_up(),
+            KeyCode::Down => app.chat.autocomplete_move_down(),
             KeyCode::Tab | KeyCode::Enter => {
                 let _ = app.chat.apply_autocomplete_selection();
             }
@@ -524,22 +829,17 @@ fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) 
             Ok(true)
         }
         KeyCode::Char('z') => {
-            app.chat.toggle_collapse_mode();
-            app.status_message = if app.chat.collapse_verbose_parts {
-                String::from("Verbose chat parts collapsed (click chevrons to expand)")
-            } else {
-                String::from("Verbose chat parts expanded")
-            };
+            app.status_message = String::from("Inline detail dropdowns disabled; use popups");
             Ok(true)
         }
         KeyCode::Enter => {
             if app.chat.open_detail_modal_for_focused() {
-                app.status_message = String::from("Opened detail view");
+                app.status_message = String::from("Opened detail popup");
                 return Ok(true);
             }
             if let Some(first) = app.layout.chat.part_toggle_hitboxes.first() {
                 app.chat.open_detail_modal_for_part(first.part_key.clone());
-                app.status_message = String::from("Opened detail view");
+                app.status_message = String::from("Opened detail popup");
                 return Ok(true);
             }
             Ok(false)
@@ -580,13 +880,13 @@ fn handle_chat_mouse_event(mouse: MouseEvent, app: &mut App) -> Result<bool> {
                 MouseEventKind::Down(MouseButton::Left) => {
                     if !rect_contains(popup, x, y) {
                         app.chat.close_detail_modal();
-                        app.status_message = String::from("Detail view closed");
+                        app.status_message = String::from("Detail popup closed");
                     }
                     return Ok(true);
                 }
                 MouseEventKind::Down(MouseButton::Right) => {
                     app.chat.close_detail_modal();
-                    app.status_message = String::from("Detail view closed");
+                    app.status_message = String::from("Detail popup closed");
                     return Ok(true);
                 }
                 MouseEventKind::ScrollUp => {
@@ -707,7 +1007,6 @@ fn handle_chat_mouse_event(mouse: MouseEvent, app: &mut App) -> Result<bool> {
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Down(MouseButton::Right) => {
-            let right_click = mouse.kind == MouseEventKind::Down(MouseButton::Right);
             if let Some(model_rect) = app.layout.chat.model_chip_rect
                 && rect_contains(model_rect, x, y)
             {
@@ -731,13 +1030,8 @@ fn handle_chat_mouse_event(mouse: MouseEvent, app: &mut App) -> Result<bool> {
             for hitbox in &app.layout.chat.part_toggle_hitboxes {
                 if rect_contains(hitbox.rect, x, y) {
                     app.chat.set_focused_part_key(Some(hitbox.part_key.clone()));
-                    if right_click {
-                        app.chat.open_detail_modal_for_part(hitbox.part_key.clone());
-                        app.status_message = String::from("Opened detail view");
-                    } else {
-                        app.chat.toggle_part_expansion(hitbox.part_key.clone());
-                        app.status_message = String::from("Toggled detail section");
-                    }
+                    app.chat.open_detail_modal_for_part(hitbox.part_key.clone());
+                    app.status_message = String::from("Opened detail popup");
                     return Ok(true);
                 }
             }
@@ -1109,6 +1403,22 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
     save_spawn_prefs(app);
 
     let tmux_session_name = session_name.clone();
+    let mut attach_url: Option<String> = None;
+    let mut attach_session_id: Option<String> = None;
+    if agent_type.eq_ignore_ascii_case("opencode") {
+        let title = format!("tinyverse: {session_name}");
+        match app.chat_bridge.create_session_for_spawn(&mut app.chat, &title) {
+            Ok(session_id) => {
+                attach_url = app.chat_bridge.opencode_base_url();
+                attach_session_id = Some(session_id);
+            }
+            Err(error) => {
+                app.status_message = format!("Spawn failed: unable to create chat session: {error}");
+                return Ok(());
+            }
+        }
+    }
+
     let mut spawn_options = SpawnSessionOptions::new(&tmux_session_name);
     let tmux_layout = load_tmux_spawn_layout();
     spawn_options.initial_window_width = Some(tmux_layout.initial_window_width);
@@ -1117,7 +1427,14 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
     spawn_options.primary_role = tmux_layout.primary_role;
     spawn_options.secondary_size_percent = Some(tmux_layout.secondary_size_percent);
     let resolved_prompt = resolve_prompt_input(&prompt);
-    spawn_options.agent_command = Some(build_agent_command(&agent_type, &model, &resolved_prompt));
+    spawn_options.agent_command = Some(build_agent_command(
+        &tmux_session_name,
+        &agent_type,
+        &model,
+        &resolved_prompt,
+        attach_url.as_deref(),
+        attach_session_id.as_deref(),
+    ));
     let spawn_result = TmuxClient::new().spawn_session(spawn_options);
 
     let spawned = match spawn_result {
@@ -1140,6 +1457,12 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
 
     match created {
         Ok(record) => {
+            if let Some(session_id) = attach_session_id.as_deref() {
+                app.spawned_chat_session_ids
+                    .insert(record.session_key.clone(), session_id.to_owned());
+                app.chat_bridge
+                    .set_active_session(&mut app.chat, session_id);
+            }
             refresh_sessions_and_preview(app, store)?;
             if let Some(index) = app
                 .sessions
@@ -1263,10 +1586,20 @@ fn capture_preview_for_role(
     let preview_text = {
         let mut options = CapturePaneOptions::new(session_target.clone());
         options.pane = Some(PaneTarget::PaneId(pane_id.clone()));
-        options.start_line = Some(-220);
-        options.include_alternate_screen = true;
+        options.preserve_ansi = true;
+        options.join_wrapped_lines = role != PanelRole::Agent;
+        if role == PanelRole::Agent {
+            options.start_line = None;
+            options.end_line = None;
+            options.include_alternate_screen = false;
+        } else {
+            options.start_line = Some(-220);
+        }
+        if role != PanelRole::Agent {
+            options.include_alternate_screen = true;
+        }
         match client.capture_pane(options) {
-            Ok(captured) => strip_ansi_and_controls(&captured.text),
+            Ok(captured) => sanitize_preview_text(captured.text),
             Err(error) => format!("Preview unavailable: {error}"),
         }
     };
@@ -1274,15 +1607,39 @@ fn capture_preview_for_role(
     if preview_text.trim().is_empty() {
         let mut fallback = CapturePaneOptions::new(session_target.clone());
         fallback.pane = Some(PaneTarget::PaneId(pane_id));
-        fallback.start_line = Some(-500);
-        fallback.include_alternate_screen = true;
+        fallback.preserve_ansi = true;
+        fallback.join_wrapped_lines = role != PanelRole::Agent;
+        if role == PanelRole::Agent {
+            fallback.include_alternate_screen = true;
+            fallback.start_line = None;
+            fallback.end_line = None;
+        } else {
+            fallback.start_line = Some(-500);
+            fallback.include_alternate_screen = true;
+        }
         return match client.capture_pane(fallback) {
-            Ok(captured) => strip_ansi_and_controls(&captured.text),
+            Ok(captured) => sanitize_preview_text(captured.text),
             Err(_) => preview_text,
         };
     }
 
     preview_text
+}
+
+fn sanitize_preview_text(text: String) -> String {
+    const PATH_WARN_PREFIX: &str = "(eval):1: no such file or directory:";
+    const TOOLBOX_SEGMENT: &str = "Support/JetBrains/Toolbox/scripts";
+
+    let filtered = text
+        .lines()
+        .filter(|line| !(line.contains(PATH_WARN_PREFIX) && line.contains(TOOLBOX_SEGMENT)))
+        .collect::<Vec<_>>();
+
+    if filtered.is_empty() {
+        text
+    } else {
+        filtered.join("\n")
+    }
 }
 
 fn execute_footer_action(
@@ -1379,24 +1736,80 @@ fn execute_footer_action(
             }
             _ => {}
         },
+        FooterHotkeyAction::PaneFocus => enter_pane_focus(app),
+        FooterHotkeyAction::PaneFocusExit => {
+            if app.mode == AppMode::PaneFocus {
+                app.mode = AppMode::Normal;
+                app.last_esc_at = None;
+                app.status_message = String::from("Exited focus mode");
+                refresh_selected_preview(app);
+            }
+        }
     }
 
     Ok(())
 }
 
-fn build_agent_command(agent: &str, model: &str, prompt: &str) -> String {
-    let mut parts = vec![agent.to_owned()];
+fn build_agent_command(
+    tmux_session_name: &str,
+    agent: &str,
+    model: &str,
+    prompt: &str,
+    attach_url: Option<&str>,
+    attach_session_id: Option<&str>,
+) -> String {
+    let mut parts = Vec::new();
+    let mut attached_to_session = false;
 
-    if !model.is_empty() {
+    if agent.eq_ignore_ascii_case("opencode") {
+        let safe_name = sanitize_opencode_dir_segment(tmux_session_name);
+        parts.push(format!(
+            "XDG_DATA_HOME=$HOME/.local/share/tinyverse-opencode/{safe_name}"
+        ));
+        parts.push(format!(
+            "XDG_STATE_HOME=$HOME/.local/state/tinyverse-opencode/{safe_name}"
+        ));
+        if let (Some(url), Some(session_id)) = (attach_url, attach_session_id) {
+            parts.push(agent.to_owned());
+            parts.push(String::from("attach"));
+            parts.push(url.to_owned());
+            parts.push(String::from("--session"));
+            parts.push(session_id.to_owned());
+            attached_to_session = true;
+        } else {
+            parts.push(agent.to_owned());
+        }
+    } else {
+        parts.push(agent.to_owned());
+    }
+
+    if !attached_to_session && !model.is_empty() {
         parts.push(String::from("--model"));
         parts.push(shell_escape(model));
     }
-    if !prompt.is_empty() {
+    if !attached_to_session && !prompt.is_empty() {
         parts.push(String::from("--prompt"));
         parts.push(shell_escape(prompt));
     }
 
     parts.join(" ")
+}
+
+fn sanitize_opencode_dir_segment(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+
+    if out.is_empty() {
+        String::from("default")
+    } else {
+        out
+    }
 }
 
 fn shell_escape(value: &str) -> String {
@@ -1621,6 +2034,125 @@ fn update_horizontal_divider_height(y: u16, app: &mut App) {
     let top_height = pointer.saturating_sub(body_rect.y);
     let inspector_height = body_rect.height.saturating_sub(top_height);
     app.inspector_height = inspector_height.clamp(6, body_rect.height.saturating_sub(6).max(6));
+}
+
+fn enter_pane_focus(app: &mut App) {
+    if app.sidebar_tab == SidebarTab::Chat {
+        app.status_message = String::from("Focus mode unavailable for Chat tab");
+        return;
+    }
+    if app.selected_session().is_none() {
+        app.status_message = String::from("No session selected");
+        return;
+    }
+    app.mode = AppMode::PaneFocus;
+    app.last_esc_at = None;
+    app.status_message = format!(
+        "Live: {} pane (f toggles, Esc Esc exits)",
+        app.sidebar_tab.title()
+    );
+}
+
+fn handle_pane_focus_key(key: KeyEvent, app: &mut App) {
+    if key.code == KeyCode::Char('f') && key.modifiers.is_empty() {
+        app.mode = AppMode::Normal;
+        app.last_esc_at = None;
+        app.status_message = String::from("Live mode off");
+        refresh_selected_preview(app);
+        return;
+    }
+
+    if key.code == KeyCode::Char('?') && key.modifiers.is_empty() {
+        app.status_message = String::from("Focus mode: press f to toggle off, or Esc Esc");
+        return;
+    }
+
+    if key.code == KeyCode::Esc {
+        let now = Instant::now();
+        if let Some(prev) = app.last_esc_at {
+            if now.duration_since(prev).as_millis() < DOUBLE_ESC_WINDOW_MS {
+                app.mode = AppMode::Normal;
+                app.last_esc_at = None;
+                app.status_message = String::from("Exited focus mode");
+                refresh_selected_preview(app);
+                return;
+            }
+        }
+        app.last_esc_at = Some(now);
+        send_tmux_key(app, "Escape");
+        return;
+    }
+
+    app.last_esc_at = None;
+
+    let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+    match key.code {
+        KeyCode::Char(c) if has_ctrl => {
+            let ctrl_char = (c as u8).wrapping_sub(b'a').wrapping_add(1);
+            if ctrl_char <= 26 {
+                let tmux_key = format!("C-{c}");
+                send_tmux_key(app, &tmux_key);
+            }
+        }
+        KeyCode::Char(c) => {
+            send_tmux_literal(app, &c.to_string());
+        }
+        KeyCode::Enter => send_tmux_key(app, "Enter"),
+        KeyCode::Backspace => send_tmux_key(app, "BSpace"),
+        KeyCode::Delete => send_tmux_key(app, "DC"),
+        KeyCode::Tab => send_tmux_key(app, "Tab"),
+        KeyCode::Up => send_tmux_key(app, "Up"),
+        KeyCode::Down => send_tmux_key(app, "Down"),
+        KeyCode::Left => send_tmux_key(app, "Left"),
+        KeyCode::Right => send_tmux_key(app, "Right"),
+        KeyCode::Home => send_tmux_key(app, "Home"),
+        KeyCode::End => send_tmux_key(app, "End"),
+        KeyCode::PageUp => send_tmux_key(app, "PPage"),
+        KeyCode::PageDown => send_tmux_key(app, "NPage"),
+        _ => {}
+    }
+
+    refresh_selected_preview(app);
+}
+
+fn send_tmux_key(app: &mut App, tmux_key_name: &str) {
+    let Some(session) = app.selected_session().cloned() else {
+        return;
+    };
+    let role = match app.sidebar_tab {
+        SidebarTab::Console => PanelRole::Console,
+        SidebarTab::Agent => PanelRole::Agent,
+        SidebarTab::Chat => return,
+    };
+    let client = TmuxClient::new();
+    let session_target = SessionTarget::new(session.tmux_session_name);
+    let pane_request = PaneTarget::Role(role);
+    let pane_id = match client.resolve_pane_id_for(&session_target, Some(&pane_request)) {
+        Ok(id) => id,
+        Err(_) => return,
+    };
+    let _ = Command::new("tmux")
+        .args(["send-keys", "-t", &pane_id, tmux_key_name])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+fn send_tmux_literal(app: &mut App, text: &str) {
+    let Some(session) = app.selected_session().cloned() else {
+        return;
+    };
+    let role = match app.sidebar_tab {
+        SidebarTab::Console => PanelRole::Console,
+        SidebarTab::Agent => PanelRole::Agent,
+        SidebarTab::Chat => return,
+    };
+    let mut options = SendKeysOptions::new(session.tmux_session_name, text.to_owned());
+    options.pane = Some(PaneTarget::Role(role));
+    options.press_enter = false;
+    let _ = TmuxClient::new().send_keys(options);
 }
 
 fn build_tmux_attach_args(in_tmux: bool, session: &str) -> Vec<String> {

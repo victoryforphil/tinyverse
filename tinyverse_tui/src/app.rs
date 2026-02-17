@@ -3,12 +3,13 @@ use std::time::Instant;
 
 use anyhow::Result;
 use ratatui::layout::Rect;
+use ratatui::text::Line;
 use tinyverse_lib::{SessionStore, StoredSession};
 
-use crate::TuiRunOptions;
 use crate::chat::ChatState;
 use crate::chat_bridge::{ChatBridge, ChatSessionSummary};
 use crate::theme::UiTheme;
+use crate::TuiRunOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
@@ -18,6 +19,7 @@ pub enum AppMode {
     ConfirmKillAll,
     SendInput,
     SpawnInput,
+    PaneFocus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +52,8 @@ pub enum FooterHotkeyAction {
     FormEditPrompt,
     Confirm,
     Cancel,
+    PaneFocus,
+    PaneFocusExit,
 }
 
 impl FooterHotkeyAction {
@@ -71,6 +75,8 @@ impl FooterHotkeyAction {
             Self::FormEditPrompt => "e",
             Self::Confirm => "y/enter",
             Self::Cancel => "n/esc",
+            Self::PaneFocus => "f",
+            Self::PaneFocusExit => "esc esc",
         }
     }
 
@@ -92,6 +98,8 @@ impl FooterHotkeyAction {
             Self::FormEditPrompt => "edit prompt",
             Self::Confirm => "confirm",
             Self::Cancel => "cancel",
+            Self::PaneFocus => "toggle live",
+            Self::PaneFocusExit => "exit live",
         }
     }
 }
@@ -151,12 +159,6 @@ pub struct SessionTreeRow {
     pub depth: usize,
     pub is_last: bool,
     pub ancestors_are_last: Vec<bool>,
-}
-
-impl SessionTreeRow {
-    pub fn prefix(&self) -> String {
-        tree_prefix(self.depth, self.is_last, &self.ancestors_are_last)
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -251,6 +253,25 @@ pub struct ChatPartToggleHitbox {
 pub struct PanePreview {
     pub console: String,
     pub agent: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRenderSignature {
+    pub message_count: usize,
+    pub last_message_id: Option<String>,
+    pub last_message_created_at: Option<String>,
+    pub last_part_count: usize,
+    pub collapse_verbose_parts: bool,
+    pub focused_part_key: Option<String>,
+}
+
+pub type CachedChatLine = (Line<'static>, Option<String>);
+
+#[derive(Debug, Clone)]
+pub struct ChatRenderCache {
+    pub width: u16,
+    pub signature: ChatRenderSignature,
+    pub lines: Vec<CachedChatLine>,
 }
 
 impl MenuAction {
@@ -357,7 +378,9 @@ pub struct LayoutCache {
     pub confirm_rect: Option<Rect>,
     pub footer_rect: Option<Rect>,
     pub sessions_view_tab_rects: Vec<(SessionsViewMode, Rect)>,
+    pub sessions_header_rect: Option<Rect>,
     pub session_tree_row_rects: Vec<(usize, Rect)>,
+    pub sidebar_header_rect: Option<Rect>,
     pub sidebar_tab_rects: Vec<(SidebarTab, Rect)>,
     pub sidebar_preview_rect: Option<Rect>,
     pub overlay: OverlayLayoutCache,
@@ -374,6 +397,10 @@ pub struct App {
     pub scroll_row: usize,
     pub inspector_visible: bool,
     pub inspector_ratio: u16,
+    pub sessions_minimized: bool,
+    pub sessions_ratio_before_minimize: u16,
+    pub sidebar_minimized: bool,
+    pub sidebar_ratio_before_minimize: u16,
     pub inspector_height: u16,
     pub dragging_divider: Option<DividerDrag>,
     pub mode: AppMode,
@@ -388,12 +415,20 @@ pub struct App {
     pub sidebar_tab: SidebarTab,
     pub chat: ChatState,
     pub chat_bridge: ChatBridge,
+    pub chat_hint_session_key: Option<String>,
+    pub chat_hint_directory: Option<String>,
+    pub chat_hint_base_url: Option<String>,
+    pub chat_hint_session_id: Option<String>,
+    pub chat_hint_refreshed_at: Option<Instant>,
+    pub spawned_chat_session_ids: HashMap<String, String>,
+    pub chat_render_cache: Option<ChatRenderCache>,
     pub pane_preview_cache: HashMap<String, PanePreview>,
     pub show_card_preview_on_all_cards: bool,
     pub footer_hover_action: Option<FooterHotkeyAction>,
     pub should_quit: bool,
     pub status_message: String,
     pub last_refresh_at: Option<Instant>,
+    pub last_esc_at: Option<Instant>,
     pub layout: LayoutCache,
 }
 
@@ -408,7 +443,11 @@ impl App {
             selected_index: 0,
             scroll_row: 0,
             inspector_visible: true,
-            inspector_ratio: 58,
+            inspector_ratio: 50,
+            sessions_minimized: false,
+            sessions_ratio_before_minimize: 50,
+            sidebar_minimized: false,
+            sidebar_ratio_before_minimize: 50,
             inspector_height: 8,
             dragging_divider: None,
             mode: AppMode::Normal,
@@ -423,12 +462,20 @@ impl App {
             sidebar_tab: SidebarTab::Console,
             chat: ChatState::default(),
             chat_bridge: ChatBridge::from_env(),
+            chat_hint_session_key: None,
+            chat_hint_directory: None,
+            chat_hint_base_url: None,
+            chat_hint_session_id: None,
+            chat_hint_refreshed_at: None,
+            spawned_chat_session_ids: HashMap::new(),
+            chat_render_cache: None,
             pane_preview_cache: HashMap::new(),
             show_card_preview_on_all_cards: false,
             footer_hover_action: None,
             should_quit: false,
             status_message: String::new(),
             last_refresh_at: None,
+            last_esc_at: None,
             layout: LayoutCache::default(),
         }
     }
@@ -436,6 +483,11 @@ impl App {
     pub fn refresh(&mut self, store: &mut SessionStore) -> Result<()> {
         store.reconcile_now()?;
         self.sessions = store.list_sessions()?;
+        self.chat_hint_session_key = None;
+        self.chat_hint_directory = None;
+        self.chat_hint_base_url = None;
+        self.chat_hint_session_id = None;
+        self.chat_hint_refreshed_at = None;
         self.pane_preview_cache.clear();
         if self.sessions.is_empty() {
             self.selected_index = 0;
@@ -449,7 +501,11 @@ impl App {
                 self.selected_index = self.sessions.len() - 1;
             }
             self.status_message = format!("Loaded {} session(s)", self.sessions.len());
-            self.sync_tree_cursor_to_active_target();
+            if self.sessions_view_mode == SessionsViewMode::Tree {
+                self.rebuild_tree_rows_preserving_cursor();
+            } else {
+                self.sync_tree_cursor_to_active_target();
+            }
         }
         self.last_refresh_at = Some(Instant::now());
         Ok(())
@@ -518,6 +574,32 @@ impl App {
     pub fn toggle_sessions_view_mode(&mut self) {
         let next = self.sessions_view_mode.toggle();
         self.set_sessions_view_mode(next);
+    }
+
+    pub fn toggle_sessions_minimized(&mut self) {
+        if self.sessions_minimized {
+            self.sessions_minimized = false;
+            self.inspector_ratio = self.sessions_ratio_before_minimize.clamp(40, 80);
+            self.status_message = String::from("Sessions panel restored");
+        } else {
+            self.sidebar_minimized = false;
+            self.sessions_ratio_before_minimize = self.inspector_ratio;
+            self.sessions_minimized = true;
+            self.status_message = String::from("Sessions panel minimized");
+        }
+    }
+
+    pub fn toggle_sidebar_minimized(&mut self) {
+        if self.sidebar_minimized {
+            self.sidebar_minimized = false;
+            self.inspector_ratio = self.sidebar_ratio_before_minimize.clamp(40, 80);
+            self.status_message = String::from("Sidebar panel restored");
+        } else {
+            self.sessions_minimized = false;
+            self.sidebar_ratio_before_minimize = self.inspector_ratio;
+            self.sidebar_minimized = true;
+            self.status_message = String::from("Sidebar panel minimized");
+        }
     }
 
     pub fn set_sessions_view_mode(&mut self, mode: SessionsViewMode) {
@@ -593,7 +675,11 @@ impl App {
             SessionTreeNode::SidebarPane { session_index, tab } => {
                 if session_index < self.sessions.len() {
                     self.selected_index = session_index;
-                    self.set_sidebar_tab(tab);
+                    self.sidebar_tab = tab;
+                    if self.sidebar_tab == SidebarTab::Chat {
+                        self.chat_bridge.sync_now(&mut self.chat);
+                    }
+                    self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
                 }
             }
             SessionTreeNode::ChatSession {
@@ -612,7 +698,6 @@ impl App {
                         self.status_message =
                             format!("Unable to switch chat session: {chat_session_id}");
                     }
-                    self.sync_tree_cursor_to_active_target();
                 }
             }
         }
@@ -668,22 +753,23 @@ impl App {
             .min(self.sessions.len().saturating_sub(1));
 
         for (session_index, session) in self.sessions.iter().enumerate() {
-            let mut chat_children = Vec::new();
-            if session_index == selected_session_index {
-                chat_children =
-                    build_chat_session_nodes(session_index, self.chat_bridge.sessions());
-            }
+            let is_selected_session = session_index == selected_session_index;
 
-            let chat_label = if chat_children.is_empty() {
-                String::from("chat")
-            } else {
-                format!("chat ({})", chat_children.len())
-            };
+            // Collapse non-selected sessions: only expand children for the
+            // selected session to reduce tree noise.
+            let children = if is_selected_session {
+                let visible_chat_sessions = filter_chat_sessions_for_session(
+                    session,
+                    self.chat_bridge.sessions(),
+                    self.chat_bridge.active_session_id(),
+                );
+                let chat_children = build_chat_session_nodes(
+                    session_index,
+                    &visible_chat_sessions,
+                    self.chat_bridge.active_session_id(),
+                );
 
-            roots.push(SessionTreeBuildNode {
-                node: SessionTreeNode::SessionRoot { session_index },
-                label: session.session_name.clone(),
-                children: vec![
+                let mut children = vec![
                     SessionTreeBuildNode {
                         node: SessionTreeNode::SidebarPane {
                             session_index,
@@ -700,15 +786,17 @@ impl App {
                         label: String::from("agent"),
                         children: Vec::new(),
                     },
-                    SessionTreeBuildNode {
-                        node: SessionTreeNode::SidebarPane {
-                            session_index,
-                            tab: SidebarTab::Chat,
-                        },
-                        label: chat_label,
-                        children: chat_children,
-                    },
-                ],
+                ];
+                children.extend(chat_children);
+                children
+            } else {
+                Vec::new()
+            };
+
+            roots.push(SessionTreeBuildNode {
+                node: SessionTreeNode::SessionRoot { session_index },
+                label: session.session_name.clone(),
+                children,
             });
         }
 
@@ -786,143 +874,124 @@ fn flatten_tree_nodes(
 fn build_chat_session_nodes(
     session_index: usize,
     chat_sessions: &[ChatSessionSummary],
+    active_session_id: Option<&str>,
 ) -> Vec<SessionTreeBuildNode> {
-    if chat_sessions.is_empty() {
-        return Vec::new();
-    }
-
-    let mut index_by_id = HashMap::new();
-    for (index, session) in chat_sessions.iter().enumerate() {
-        index_by_id.insert(session.id.clone(), index);
-    }
-
-    let mut children_by_parent: HashMap<usize, Vec<usize>> = HashMap::new();
-    let mut roots = Vec::new();
-    for (index, session) in chat_sessions.iter().enumerate() {
-        let parent_index = session
-            .parent_id
-            .as_deref()
-            .and_then(|id| index_by_id.get(id).copied())
-            .filter(|parent| *parent != index);
-        if let Some(parent) = parent_index {
-            children_by_parent.entry(parent).or_default().push(index);
-        } else {
-            roots.push(index);
-        }
-    }
-
-    let mut out = Vec::new();
-    let mut visited = HashSet::new();
-    for root in roots {
-        if let Some(node) = build_chat_session_node_recursive(
-            root,
-            session_index,
-            chat_sessions,
-            &children_by_parent,
-            &mut visited,
-        ) {
-            out.push(node);
-        }
-    }
-
-    for index in 0..chat_sessions.len() {
-        if visited.contains(&index) {
-            continue;
-        }
-        if let Some(node) = build_chat_session_node_recursive(
-            index,
-            session_index,
-            chat_sessions,
-            &children_by_parent,
-            &mut visited,
-        ) {
-            out.push(node);
-        }
-    }
-
-    out
-}
-
-fn build_chat_session_node_recursive(
-    index: usize,
-    session_index: usize,
-    chat_sessions: &[ChatSessionSummary],
-    children_by_parent: &HashMap<usize, Vec<usize>>,
-    visited: &mut HashSet<usize>,
-) -> Option<SessionTreeBuildNode> {
-    if !visited.insert(index) {
-        return None;
-    }
-
-    let session = chat_sessions.get(index)?;
-    let mut children = Vec::new();
-    if let Some(child_indexes) = children_by_parent.get(&index) {
-        for child in child_indexes {
-            if let Some(node) = build_chat_session_node_recursive(
-                *child,
+    chat_sessions
+        .iter()
+        .map(|session| SessionTreeBuildNode {
+            node: SessionTreeNode::ChatSession {
                 session_index,
-                chat_sessions,
-                children_by_parent,
-                visited,
-            ) {
-                children.push(node);
-            }
-        }
-    }
-
-    Some(SessionTreeBuildNode {
-        node: SessionTreeNode::ChatSession {
-            session_index,
-            chat_session_id: session.id.clone(),
-        },
-        label: if session.title.trim().is_empty() {
-            session.id.clone()
-        } else {
-            truncate_label(&session.title, 44)
-        },
-        children,
-    })
+                chat_session_id: session.id.clone(),
+            },
+            label: if session.title.trim().is_empty() {
+                if active_session_id == Some(session.id.as_str()) {
+                    format!("* {}", session.id)
+                } else {
+                    session.id.clone()
+                }
+            } else {
+                let compact = tinyverse_tui_components::compact_text(&session.title, 44);
+                if active_session_id == Some(session.id.as_str()) {
+                    format!("* {compact}")
+                } else {
+                    compact
+                }
+            },
+            children: Vec::new(),
+        })
+        .collect()
 }
 
-fn tree_prefix(depth: usize, is_last: bool, ancestors_are_last: &[bool]) -> String {
-    let mut prefix = String::new();
+fn filter_chat_sessions_for_session(
+    session: &StoredSession,
+    chat_sessions: &[ChatSessionSummary],
+    active_session_id: Option<&str>,
+) -> Vec<ChatSessionSummary> {
+    let index_by_id = chat_sessions
+        .iter()
+        .enumerate()
+        .map(|(index, item)| (item.id.as_str(), index))
+        .collect::<HashMap<_, _>>();
 
-    for ancestor_is_last in ancestors_are_last.iter().take(depth.saturating_sub(1)) {
-        if *ancestor_is_last {
-            prefix.push_str("   ");
-        } else {
-            prefix.push_str("│  ");
-        }
-    }
-
-    if depth == 0 {
-        prefix.push_str("● ");
-        return prefix;
-    }
-
-    if is_last {
-        prefix.push_str("└─ ");
-    } else {
-        prefix.push_str("├─ ");
-    }
-
-    prefix
+    chat_sessions
+        .iter()
+        .filter(|chat_session| {
+            chat_session_belongs_to_session(session, chat_session)
+                || chat_session_related_to_active(
+                    chat_session,
+                    active_session_id,
+                    chat_sessions,
+                    &index_by_id,
+                )
+        })
+        .cloned()
+        .collect()
 }
 
-fn truncate_label(value: &str, max_chars: usize) -> String {
-    if max_chars == 0 {
-        return String::new();
+fn chat_session_belongs_to_session(
+    session: &StoredSession,
+    chat_session: &ChatSessionSummary,
+) -> bool {
+    let title = chat_session.title.trim();
+    if title.is_empty() {
+        return false;
+    }
+    let title_lower = title.to_ascii_lowercase();
+
+    [
+        session.session_name.as_str(),
+        session.session_key.as_str(),
+        session.tmux_session_name.as_str(),
+    ]
+    .into_iter()
+    .map(str::trim)
+    .filter(|value| !value.is_empty())
+    .map(str::to_ascii_lowercase)
+    .any(|needle| title_lower.contains(&needle))
+}
+
+fn chat_session_related_to_active(
+    chat_session: &ChatSessionSummary,
+    active_session_id: Option<&str>,
+    chat_sessions: &[ChatSessionSummary],
+    index_by_id: &HashMap<&str, usize>,
+) -> bool {
+    let Some(active_id) = active_session_id else {
+        return false;
+    };
+    if chat_session.id == active_id {
+        return true;
     }
 
-    let count = value.chars().count();
-    if count <= max_chars {
-        return value.to_owned();
+    let mut cursor = Some(active_id);
+    let mut seen = HashSet::new();
+    while let Some(current_id) = cursor {
+        if !seen.insert(current_id) {
+            break;
+        }
+        if current_id == chat_session.id {
+            return true;
+        }
+        cursor = index_by_id
+            .get(current_id)
+            .and_then(|index| chat_sessions.get(*index))
+            .and_then(|entry| entry.parent_id.as_deref());
     }
 
-    if max_chars <= 1 {
-        return "…".to_owned();
+    let mut cursor = chat_session.parent_id.as_deref();
+    let mut seen = HashSet::new();
+    while let Some(current_id) = cursor {
+        if !seen.insert(current_id) {
+            break;
+        }
+        if current_id == active_id {
+            return true;
+        }
+        cursor = index_by_id
+            .get(current_id)
+            .and_then(|index| chat_sessions.get(*index))
+            .and_then(|entry| entry.parent_id.as_deref());
     }
 
-    let truncated = value.chars().take(max_chars - 1).collect::<String>();
-    format!("{truncated}…")
+    false
 }
