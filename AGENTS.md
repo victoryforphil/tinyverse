@@ -39,8 +39,9 @@ Current state:
 - Rust CLI tests are available in `tinyverse_cli`.
 
 Testing preference:
-- Prefer `cargo nextest run` for Rust test execution.
-- If `cargo nextest` is unavailable or errors due to environment/tooling, fall back to `cargo test`.
+- Rust test execution prefers `cargo nextest run`, with automatic fallback to `cargo test` when nextest is unavailable.
+- Wrapper script: `scripts/helpers/test_rust.sh.ts` (passes all args transparently).
+- Via Moon: `moon run tinyverse_lib:test` or `moon :test` (uses wrapper internally).
 
 Operational commands:
 - Install Moon project dependencies: `moon :install`

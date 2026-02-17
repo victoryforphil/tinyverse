@@ -8,10 +8,10 @@ anyhow = { version = "1.0.101", features = ["backtrace"] }
 clap = { version = "4.5.59", features = ["derive", "env"] }
 log = "0.4.29"
 nu-ansi-term = "0.50.3"
+prettytable-rs = "0.10.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tinyverse_lib = { path = "../tinyverse_lib" }
-tinyverse_ui = { path = "../tinyverse_ui" }
 toml = "1.0.2"
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-log = "0.2.0"

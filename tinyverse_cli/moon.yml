@@ -27,8 +27,8 @@ tasks:
       - "/Cargo.lock"
 
   test:
-    command: "bun"
-    args: ["./scripts/helpers/test_rust.sh.ts"]
+    command: "sh"
+    args: ["-c", "cargo nextest run || cargo test"]
     inputs:
       - "src/**/*"
       - "Cargo.toml"
