@@ -82,3 +82,17 @@ Single-test note:
 - Run the touched command path when safe.
 - Keep diffs minimal and style-consistent.
 - Confirm no obvious runtime breakage from edited flow.
+
+## Agent Workflows
+
+### TUI refinement (parent-orchestrated)
+
+- Use this flow when refining, cleaning up, or finalizing Ratatui/TUI UX.
+- Start with one broad `@tui_designer` pass that returns:
+  - prioritized critique notes
+  - a desired TODO list split into small tasks
+- Parent agent turns that TODO into scoped work items and ownership.
+- Parent agent runs `@explore` for file-level context before implementation handoffs.
+- Parent agent dispatches smaller, focused tasks to `@tui_designer` (parallel when independent).
+- Parent agent assembles changes, resolves overlap, and verifies touched command paths.
+- Run one final `@tui_designer` review round for consistency and finishing polish.

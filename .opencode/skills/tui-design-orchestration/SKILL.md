@@ -8,6 +8,7 @@ description: Orchestrate Ratatui design critique, component planning, parallel i
 - Route Ratatui design work through `@tui_designer` with a repeatable critique-to-build loop.
 - Require `@explore` context gathering before major design decisions.
 - Encourage parallel component implementation, then parent-agent integration and final design QA.
+- Enforce a parent-orchestrated loop where the first design pass returns critique notes and a desired TODO backlog.
 
 ## When to use me
 
@@ -15,17 +16,14 @@ Use this skill when the user asks for TUI redesign, visual polish, UX critique, 
 
 ## Required workflow
 
-1. Start with context sweeps via `@explore` in parallel:
-   - Code context pass: locate current UI/rendering/component files and constraints.
-   - Docs context pass: search `docs/external/ratatui/` for relevant patterns (layout, widgets, component architecture, state, event handling).
-2. Invoke `@tui_designer` for design critique of the current project.
-3. Invoke `@tui_designer` for a component plan:
-   - list proposed components
-   - boundaries and responsibilities
-   - implementation order
-4. Spawn multiple `@tui_designer` tasks in parallel, one focused component per task.
-5. Parent agent integrates all component work, resolves overlap, and validates behavior.
-6. Run one final `@tui_designer` pass for consistency feedback and finishing advice.
+1. Invoke one broad `@tui_designer` first pass to produce:
+   - prioritized critique notes
+   - desired TODO backlog broken into small tasks
+2. Parent agent converts that backlog into scoped work items and ownership.
+3. Parent agent runs `@explore` context gathering for target files before implementation handoffs.
+4. Spawn multiple focused `@tui_designer` tasks in parallel when independent (one component or concern per task).
+5. Parent agent integrates all subtask outputs, resolves overlap, and validates behavior.
+6. Run one final `@tui_designer` review pass for consistency feedback and finishing advice.
 
 ## Handoff template
 
@@ -39,8 +37,8 @@ Use this structure when delegating to `@tui_designer`:
 
 ## Return checklist
 
-- Critique findings and priority order
-- Component backlog and ownership split
-- Parallel task list (component per subtask)
-- Integration notes for parent agent
+- First-pass critique findings and priority order
+- Desired TODO backlog (small, dispatchable tasks)
+- Scoped subtask/ownership split prepared for parent orchestration
+- Integration notes for parent assembly
 - Final polish feedback from closing design pass
