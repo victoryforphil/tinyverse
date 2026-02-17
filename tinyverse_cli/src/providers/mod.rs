@@ -139,13 +139,24 @@ fn shell_escape(value: &str) -> String {
         return "''".to_owned();
     }
 
-    let escaped = value.replace('\'', "'\"'\"'");
-    format!("'{escaped}'")
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '\'' => escaped.push_str("\\'"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(ch),
+        }
+    }
+
+    format!("$'{escaped}'")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{LaunchContext, Provider, ProviderMetadata, all, find_by_key};
+    use super::{all, find_by_key, LaunchContext, Provider, ProviderMetadata};
 
     struct MockProvider;
 
@@ -182,7 +193,7 @@ mod tests {
             args: None,
         });
 
-        assert_eq!(command, "opencode --prompt 'run tests'");
+        assert_eq!(command, "opencode --prompt $'run tests'");
     }
 
     #[test]
@@ -194,7 +205,7 @@ mod tests {
             args: Some("--prompt {prompt} --model {model}"),
         });
 
-        assert_eq!(command, "opencode --prompt 'triage bug' --model 'fast'");
+        assert_eq!(command, "opencode --prompt $'triage bug' --model $'fast'");
     }
 
     #[test]
@@ -206,7 +217,7 @@ mod tests {
             args: Some("--dry-run"),
         });
 
-        assert_eq!(command, "mock-cli --model 'cheap' --dry-run");
+        assert_eq!(command, "mock-cli --model $'cheap' --dry-run");
     }
 
     #[test]
@@ -220,8 +231,21 @@ mod tests {
 
         assert_eq!(
             command,
-            "opencode --prompt 'run `pwd` and $HOME safely; don'\"'\"'t expand'"
+            "opencode --prompt $'run `pwd` and $HOME safely; don\\'t expand'"
         );
+    }
+
+    #[test]
+    fn encodes_multiline_prompts_without_literal_newlines() {
+        let provider = find_by_key("opencode").expect("opencode provider should exist");
+        let command = provider.build_launch_command(LaunchContext {
+            prompt: Some("line one\nline two"),
+            model: None,
+            args: None,
+        });
+
+        assert!(!command.contains('\n'));
+        assert!(command.contains("line one\\nline two"));
     }
 
     #[test]
