@@ -1,0 +1,40 @@
+---
+source: tinyverse_tui/src/runtime/render.rs
+expression: snapshot
+---
+tinyverse tui  |  1 session(s)
+┌ tinyverse_alpha ──────────────────────┐                                         ┌ Inspector ─────────────────────────┐
+│key: tinyverse_alpha                   │                                         │name: tinyverse_alpha               │
+│agent: opencode                        │                                         │key: tinyverse_alpha                │
+│status: active                         │                                         │agent: opencode                     │
+│tmux: tinyverse_alpha                  │                                         │status: active                      │
+└───────────────────────────────────────┘                                         │tmux: tinyverse_alpha               │
+                                                                                  │console: %1                         │
+                                                                                  │agent pane: %2                      │
+                                                                                  │description: Snapshot test session  │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                      ┌ Actions ─────────────────────────────────┐│                                    │
+                                      │> 1. Refresh sessions                     ││                                    │
+                                      │2. Toggle inspector                       ││                                    │
+                                      │3. Attach selected session                ││                                    │
+                                      │4. Send command to console pane           ││                                    │
+                                      │5. Spawn new session                      ││                                    │
+                                      │6. Kill selected session                  ││                                    │
+                                      │7. Close menu                             ││                                    │
+                                      │                                          ││                                    │
+                                      │                                          ││                                    │
+                                      │                                          ││                                    │
+                                      └──────────────────────────────────────────┘│                                    │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                                                                  │                                    │
+                                                                                  └────────────────────────────────────┘
+[j/k] menu [enter] select [1-7] quick [esc] close | Starting tinyverse TUI | never refreshed

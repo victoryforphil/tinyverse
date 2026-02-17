@@ -1,0 +1,34 @@
+---
+source: tinyverse_tui/src/runtime/render.rs
+expression: snapshot
+---
+tinyverse tui  |  0 session(s)
+                                                                    ┌ Inspector ───────────────────┐
+                                                                    │No session selected           │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+     ┌ TinyVerse ─────────────────────────────────────────────┐     │                              │
+     │No sessions found.                                      │     │                              │
+     │Run `tinyverse spawn <name>` to create one.             │     │                              │
+     │                                                        │     │                              │
+     └────────────────────────────────────────────────────────┘     │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    │                              │
+                                                                    └──────────────────────────────┘
+[q] quit [arrows/hjkl] nav [r] refresh [i] inspector [enter] menu | No sessions found | never refres
