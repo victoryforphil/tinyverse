@@ -280,15 +280,11 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &App) {
             .unwrap_or_else(|| String::from("Loading agent preview..."));
 
         frame.render_widget(
-            Paragraph::new(console_preview)
-                .style(Style::default().fg(Color::Gray))
-                .wrap(Wrap { trim: false }),
+            Paragraph::new(console_preview).style(Style::default().fg(Color::Gray)),
             console_inner,
         );
         frame.render_widget(
-            Paragraph::new(agent_preview)
-                .style(Style::default().fg(Color::Gray))
-                .wrap(Wrap { trim: false }),
+            Paragraph::new(agent_preview).style(Style::default().fg(Color::Gray)),
             agent_inner,
         );
     } else {
@@ -343,6 +339,12 @@ fn render_action_menu(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
         .title(" Actions ")
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .title_style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
         .border_style(Style::default().fg(Color::Cyan));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -350,7 +352,7 @@ fn render_action_menu(frame: &mut Frame, area: Rect, app: &mut App) {
     let mut lines = Vec::with_capacity(MENU_ACTIONS.len());
     for (index, action) in MENU_ACTIONS.iter().enumerate() {
         let is_selected = index == app.action_menu_index;
-        let prefix = if is_selected { ">" } else { " " };
+        let prefix = if is_selected { "▸" } else { " " };
         let style = if matches!(
             action,
             MenuAction::KillSession | MenuAction::KillAllSessions
@@ -362,14 +364,15 @@ fn render_action_menu(frame: &mut Frame, area: Rect, app: &mut App) {
             }
         } else if is_selected {
             Style::default()
-                .fg(Color::White)
+                .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Gray)
         };
 
+        let hotkey = action.hotkey();
         lines.push(Line::from(vec![Span::styled(
-            format!("{} {}. {}", prefix, index + 1, action.label()),
+            format!("{} {}  {}", prefix, hotkey, action.label()),
             style,
         )]));
     }

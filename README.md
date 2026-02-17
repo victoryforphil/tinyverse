@@ -167,11 +167,11 @@ cargo run -p tinyverse_cli -- config set spawn.default_model gpt-5.3-codex
 cargo run -p tinyverse_cli -- config set workspace.default_dir ~/repos/vfp/tinyverse
 
 # Tune default tmux spawn layout
-cargo run -p tinyverse_cli -- config set tmux.initial_window_width 180
-cargo run -p tinyverse_cli -- config set tmux.initial_window_height 54
+cargo run -p tinyverse_cli -- config set tmux.initial_window_width 220
+cargo run -p tinyverse_cli -- config set tmux.initial_window_height 64
 cargo run -p tinyverse_cli -- config set tmux.layout.direction horizontal
 cargo run -p tinyverse_cli -- config set tmux.layout.primary agent
-cargo run -p tinyverse_cli -- config set tmux.layout.secondary_percent 40
+cargo run -p tinyverse_cli -- config set tmux.layout.secondary_percent 35
 
 # Check effective config and export as TOML
 cargo run -p tinyverse_cli -- config print
@@ -256,11 +256,11 @@ workspace.default_dir: <unset>
 git.branch_prefix: tv/
 spawn.default_agent: opencode
 spawn.default_model: <unset>
-tmux.initial_window_width: 180
-tmux.initial_window_height: 54
+tmux.initial_window_width: 220
+tmux.initial_window_height: 64
 tmux.layout.direction: horizontal
 tmux.layout.primary: agent
-tmux.layout.secondary_percent: 40
+tmux.layout.secondary_percent: 35
 ```
 
 ```yaml
@@ -275,10 +275,10 @@ spawn:
   default_agent: opencode
   default_model: null
 tmux:
-  initial_window_width: 180
-  initial_window_height: 54
+  initial_window_width: 220
+  initial_window_height: 64
   layout:
     direction: horizontal
     primary: agent
-    secondary_percent: 40
+    secondary_percent: 35
 ```

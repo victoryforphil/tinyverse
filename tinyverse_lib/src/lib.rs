@@ -3,6 +3,8 @@ pub mod picker;
 pub mod session_name;
 pub mod session_select;
 pub mod session_store;
+pub mod spawn_layout;
+pub mod terminal_text;
 pub mod tmux;
 pub mod tmux_helpers;
 pub mod tui_arg_select;
@@ -17,9 +19,12 @@ pub use session_store::{
     CreateSessionInput, DEFAULT_RECONCILE_MIN_INTERVAL, ResetDbReport, STATUS_ACTIVE, SessionStore,
     StoredSession, reset_db_with_backup, sanitize_session_key,
 };
+pub use spawn_layout::{TmuxSpawnLayout, load_tmux_spawn_layout};
+pub use terminal_text::strip_ansi_and_controls;
 pub use tmux::{
     CapturePaneOptions, CapturedPane, ListSessionsOptions, PaneTarget, PanelRole, SendKeysOptions,
-    SessionSummary, SessionTarget, SpawnSessionOptions, SpawnSessionResult, TmuxClient, TmuxError,
+    SessionSummary, SessionTarget, SpawnSessionOptions, SpawnSessionResult, SplitDirection,
+    TmuxClient, TmuxError,
 };
 pub use tmux_helpers::{
     PaneSnapshot, current_pane_id, current_session_target, list_pane_snapshots,

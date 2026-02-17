@@ -113,14 +113,35 @@ impl MenuAction {
             Self::CloseMenu => "Close menu",
         }
     }
+
+    pub fn hotkey(self) -> char {
+        match self {
+            Self::SpawnSession => 's',
+            Self::Refresh => 'r',
+            Self::ToggleInspector => 'i',
+            Self::AttachSession => 'a',
+            Self::SendToConsole => 'c',
+            Self::KillSession => 'x',
+            Self::KillAllSessions => 'k',
+            Self::CloseMenu => 'q',
+        }
+    }
+
+    pub fn from_hotkey(key: char) -> Option<Self> {
+        let normalized = key.to_ascii_lowercase();
+        MENU_ACTIONS
+            .iter()
+            .copied()
+            .find(|action| action.hotkey() == normalized)
+    }
 }
 
 pub const MENU_ACTIONS: [MenuAction; 8] = [
+    MenuAction::SpawnSession,
     MenuAction::Refresh,
     MenuAction::ToggleInspector,
     MenuAction::AttachSession,
     MenuAction::SendToConsole,
-    MenuAction::SpawnSession,
     MenuAction::KillSession,
     MenuAction::KillAllSessions,
     MenuAction::CloseMenu,

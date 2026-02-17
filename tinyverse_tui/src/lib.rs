@@ -16,7 +16,7 @@ pub struct TuiRunOptions {
 impl Default for TuiRunOptions {
     fn default() -> Self {
         Self {
-            refresh_interval: Duration::from_secs(3),
+            refresh_interval: Duration::from_millis(1200),
         }
     }
 }

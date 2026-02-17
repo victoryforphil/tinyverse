@@ -3,7 +3,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use log::info;
 use tinyverse_lib::tmux::{CapturePaneOptions, PaneTarget, TmuxClient};
-use tinyverse_lib::{SessionStore, pane_target_from_selector, resolve_session_target_with_store};
+use tinyverse_lib::{
+    SessionStore, pane_target_from_selector, resolve_session_target_with_store,
+    strip_ansi_and_controls,
+};
 use tinyverse_ui::{ActionLine, LabeledField, Panel, Tone, default_stdout_context};
 
 use super::args::{ViewArgs, ViewOutput};
@@ -17,6 +20,7 @@ pub fn execute(args: ViewArgs) -> Result<()> {
     let mut options = CapturePaneOptions::new(session.clone());
     options.pane = pane.clone();
     options.start_line = Some(-500);
+    options.preserve_ansi = args.output == ViewOutput::Raw;
 
     let client = TmuxClient::new();
     let captured = client
@@ -51,6 +55,8 @@ fn render_output(
         return captured_text.to_owned();
     }
 
+    let cleaned_text = strip_ansi_and_controls(captured_text);
+
     let context = default_stdout_context();
     let display_name = display_session_name(session_name);
 
@@ -68,7 +74,7 @@ fn render_output(
     .render(&context);
     let field = LabeledField::new("Pane", target_label).render(&context);
 
-    Panel::new([header, field, String::new(), captured_text.to_owned()].join("\n"))
+    Panel::new([header, field, String::new(), cleaned_text].join("\n"))
         .with_title("TinyVerse: View")
         .with_tone(Tone::Info)
         .render(&context)

@@ -208,6 +208,10 @@ impl TmuxClient {
             pane_id.clone(),
         ];
 
+        if options.preserve_ansi {
+            args.push("-e".to_owned());
+        }
+
         if let Some(start_line) = options.start_line {
             args.push("-S".to_owned());
             args.push(start_line.to_string());
@@ -633,6 +637,7 @@ mod tests {
                 pane: Some(PaneTarget::Role(PanelRole::Console)),
                 start_line: Some(-100),
                 end_line: None,
+                preserve_ansi: false,
             })
             .expect("capture should succeed");
 

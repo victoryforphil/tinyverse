@@ -48,6 +48,7 @@ pub struct CapturePaneOptions {
     pub pane: Option<PaneTarget>,
     pub start_line: Option<i32>,
     pub end_line: Option<i32>,
+    pub preserve_ansi: bool,
 }
 
 impl CapturePaneOptions {
@@ -57,6 +58,7 @@ impl CapturePaneOptions {
             pane: None,
             start_line: None,
             end_line: None,
+            preserve_ansi: false,
         }
     }
 }

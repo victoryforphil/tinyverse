@@ -344,15 +344,15 @@ fn default_spawn_agent() -> String {
 }
 
 fn default_tmux_initial_window_width() -> u16 {
-    180
+    220
 }
 
 fn default_tmux_initial_window_height() -> u16 {
-    54
+    64
 }
 
 fn default_tmux_layout_secondary_percent() -> u8 {
-    40
+    35
 }
 
 fn default_tmux_layout_direction() -> TmuxLayoutDirection {

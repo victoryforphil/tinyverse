@@ -1,6 +1,6 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 708
+assertion_line: 711
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
@@ -15,18 +15,18 @@ tinyverse tui  |  1 session(s)
                                                                                   │description: Snapshot test session  │
                                                                                   │                                    │
                                                                                   │┌ Console Preview ─────────────────┐│
-                                      ┌ Actions ─────────────────────────────────┐││Loading console preview...        ││
-                                      │> 1. Refresh sessions                     │││                                  ││
-                                      │2. Toggle inspector                       │││                                  ││
-                                      │3. Attach selected session                │││                                  ││
-                                      │4. Send command to console pane           │││                                  ││
-                                      │5. Spawn new session                      │││                                  ││
-                                      │6. Kill selected session                  │││                                  ││
-                                      │7. Kill all sessions                      │││                                  ││
-                                      │8. Close menu                             │││                                  ││
+                                      ╭ Actions ─────────────────────────────────╮││Loading console preview...        ││
+                                      │▸ s  Spawn new session                    │││                                  ││
+                                      │r  Refresh sessions                       │││                                  ││
+                                      │i  Toggle inspector                       │││                                  ││
+                                      │a  Attach selected session                │││                                  ││
+                                      │c  Send command to console pane           │││                                  ││
+                                      │x  Kill selected session                  │││                                  ││
+                                      │k  Kill all sessions                      │││                                  ││
+                                      │q  Close menu                             │││                                  ││
                                       │                                          │││                                  ││
                                       │                                          ││└──────────────────────────────────┘│
-                                      └──────────────────────────────────────────┘│┌ Agent Preview ───────────────────┐│
+                                      ╰──────────────────────────────────────────╯│┌ Agent Preview ───────────────────┐│
                                                                                   ││Loading agent preview...          ││
                                                                                   ││                                  ││
                                                                                   ││                                  ││

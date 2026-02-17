@@ -9,7 +9,8 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tinyverse_lib::{
     CapturePaneOptions, CreateSessionInput, PaneTarget, PanelRole, SendKeysOptions, SessionStore,
-    SessionTarget, SpawnSessionOptions, TmuxClient, resolve_session_name,
+    SessionTarget, SpawnSessionOptions, TmuxClient, load_tmux_spawn_layout, resolve_session_name,
+    strip_ansi_and_controls,
 };
 
 use crate::app::{App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction, PanePreview};
@@ -81,10 +82,8 @@ fn handle_key_event(
                 execute_menu_action(app.selected_menu_action(), terminal, app, store)?
             }
             KeyCode::Char(c) => {
-                if let Some(index) = digit_to_index(c) {
-                    if let Some(action) = MENU_ACTIONS.get(index).copied() {
-                        execute_menu_action(action, terminal, app, store)?;
-                    }
+                if let Some(action) = MenuAction::from_hotkey(c) {
+                    execute_menu_action(action, terminal, app, store)?;
                 }
             }
             _ => {}
@@ -413,6 +412,12 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
 
     let tmux_session_name = session_name.clone();
     let mut spawn_options = SpawnSessionOptions::new(&tmux_session_name);
+    let tmux_layout = load_tmux_spawn_layout();
+    spawn_options.initial_window_width = Some(tmux_layout.initial_window_width);
+    spawn_options.initial_window_height = Some(tmux_layout.initial_window_height);
+    spawn_options.split_direction = tmux_layout.split_direction;
+    spawn_options.primary_role = tmux_layout.primary_role;
+    spawn_options.secondary_size_percent = Some(tmux_layout.secondary_size_percent);
     let resolved_prompt = resolve_prompt_input(&prompt);
     spawn_options.agent_command = Some(build_agent_command(&agent_type, &model, &resolved_prompt));
     let spawn_result = TmuxClient::new().spawn_session(spawn_options);
@@ -531,7 +536,7 @@ pub(crate) fn refresh_selected_preview(app: &mut App) {
         options.pane = Some(PaneTarget::Role(PanelRole::Console));
         options.start_line = Some(-40);
         match TmuxClient::new().capture_pane(options) {
-            Ok(captured) => captured.text,
+            Ok(captured) => strip_ansi_and_controls(&captured.text),
             Err(error) => format!("Preview unavailable: {error}"),
         }
     };
@@ -541,7 +546,7 @@ pub(crate) fn refresh_selected_preview(app: &mut App) {
         options.pane = Some(PaneTarget::Role(PanelRole::Agent));
         options.start_line = Some(-40);
         match TmuxClient::new().capture_pane(options) {
-            Ok(captured) => captured.text,
+            Ok(captured) => strip_ansi_and_controls(&captured.text),
             Err(error) => format!("Preview unavailable: {error}"),
         }
     };
@@ -753,19 +758,6 @@ fn open_prompt_in_editor(
     }
 
     Ok(())
-}
-
-fn digit_to_index(ch: char) -> Option<usize> {
-    if !ch.is_ascii_digit() {
-        return None;
-    }
-
-    let digit = ch.to_digit(10)?;
-    if digit == 0 {
-        return None;
-    }
-
-    Some((digit - 1) as usize)
 }
 
 fn action_menu_index_from_click(menu_rect: ratatui::layout::Rect, y: u16) -> Option<usize> {
