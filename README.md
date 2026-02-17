@@ -28,25 +28,60 @@
 
 ## CLI / Commands
 
-- `tinyverse` // Root command / binary 
-    - `providers` // List available agent providers (OpenCode, Codex, etc.) and their status (installed, needs config, etc.) + config options
-    - `config` // View and edit tinyverse config (like default provider, session settings, etc.)
-        - `export` // Export current config as TOML (will start as all default values populated)
-        - `print` // Print current config values in a human readable format
-    - `path` // Show the `tinyverse` dot-file directory path for storing config, session data, logs, etc. (~/.tinyverse/ but realpath'd)
-    - `list` // List all tinyverse sessions, with info on their status, start time, etc. (tmux session list + our metadata)
-    - `spawn` // Spawn a new tinyverse session with a given agent (OpenCode, Codex, etc.) and optional config (like starting prompt, tools to enable, etc.)
-       - `--agent={opencode}` // Which agent to spawn in the session (future: codex, dark_chat)
-       - `--prompt={file_or_string}` // Optional starting prompt for the agent, can be a direct string or a file path to read the prompt from
-            - Tool information on CLI use is automatically appeneded and thus is the default value if this additional field is left blank.
-       - `--agent_args={json}` // Optional JSON string of additional args to pass to the agent on startup, like tool config, model config, etc. Can use {prompt} as a placeholder for the actual prompt after reading from file or arg which is set to the prompt string.
-    - `kill` // Kill a tinyverse session by ID or name (tmux kill-session)
-    - `view` // Get the current text buffer of the console panel in a session
-        - `--panel={console|agent|(panel_id)}` // Which panel to view, defaults to console when theres just one (or first one)
-        - `--session={id}` // Which session to view the console of, defaults to the current session if inside said tmux session (called by the agent itself)
-    - `send {command}` // Send a command to the console panel of a session
-        - `--session={id}` // Which session to send the command to, defaults to the current session if inside said tmux session (called by the agent itself)
-        - `--panel={console|agent|(panel_id)}` // Which panel to send the command to, defaults to console when theres just one (or first one)
-    - `debug` // Debugging utilities for sessions, like viewing logs, getting session info, etc.
-        - `self` // Check to see if we are in a tmux session, and if so print out info on the session and panels to stdout for the agent to use. Useful for debugging and for agents to understand their environment.
-            -- `--format={text|json}` // Output format, defaults to text but json is also available for easier parsing by agents
+- Root command: `tinyverse`
+- In this repo, run commands via: `cargo run -p tinyverse_cli -- <command>`
+
+### Commands
+
+- `list` // List tmux sessions known to tinyverse (defaults to tinyverse-only sessions).
+  - `--all` to include every tmux session
+  - `--format={table|text|json}` (default: `table`)
+- `spawn` // Create a new tinyverse session (console + agent panes).
+  - `--agent={opencode}`
+  - `--prompt={file_or_string}`
+  - `--agent_args={string}` (supports `{prompt}` placeholder)
+- `attach <session>` // Attach to an existing session by name/id.
+- `kill <session>` // Kill session by name/id.
+- `view` // Capture pane output.
+  - `--session={id}` (optional inside tmux, required outside tmux)
+  - `--panel={console|agent|%pane_id}`
+- `send <command>` // Send keys to pane.
+  - `--session={id}` (optional inside tmux, required outside tmux)
+  - `--panel={console|agent|%pane_id}`
+- `debug self` // Inspect current tmux context.
+  - `--format={table|text|json}`
+
+### Quick Copy/Paste Examples
+
+```bash
+# Spawn a new session with default agent
+cargo run -p tinyverse_cli -- spawn
+
+# Spawn with a prompt string
+cargo run -p tinyverse_cli -- spawn --prompt "you are a helpful coding agent"
+
+# List tinyverse sessions only (default)
+cargo run -p tinyverse_cli -- list
+
+# List all tmux sessions
+cargo run -p tinyverse_cli -- list --all
+
+# List as JSON (for scripting)
+cargo run -p tinyverse_cli -- list --format json
+
+# Attach to a session
+cargo run -p tinyverse_cli -- attach tinyverse_123
+
+# Send a command to a specific session console pane
+cargo run -p tinyverse_cli -- send "pwd" --session tinyverse_123 --panel console
+
+# View latest console output for a session
+cargo run -p tinyverse_cli -- view --session tinyverse_123 --panel console
+
+# Debug current context as text/json
+cargo run -p tinyverse_cli -- debug self
+cargo run -p tinyverse_cli -- debug self --format json
+
+# Kill a session
+cargo run -p tinyverse_cli -- kill tinyverse_123
+```

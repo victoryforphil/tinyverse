@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 
 mod commands;
+mod providers;
 mod root;
 mod run;
 

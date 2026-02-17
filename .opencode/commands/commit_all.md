@@ -26,7 +26,10 @@ Process:
 
 Rules:
 
-- Perfer a few commits - its okay to combine with + or summarize.
+- Prefer 1-3 commits total for most runs.
+- Ideal default is 1-2 commits unless there is clearly separate work.
+- Only exceed 3 commits when there was substantial parallel or truly independent change streams.
+- It is okay to combine related changes with `+` or summarize into a single cohesive commit.
 - Do not commit likely secret files (`.env`, credentials, private keys).
 - Do not push.
 - If no commit-worthy changes exist, report that clearly.

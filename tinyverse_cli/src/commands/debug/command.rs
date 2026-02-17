@@ -47,7 +47,7 @@ fn execute_self(args: DebugSelfArgs) -> Result<()> {
         report.panes.len()
     );
 
-    let rendered = render_output(&report, args.format, format_text_report)?;
+    let rendered = render_output(&report, args.format, format_text_report, format_text_report)?;
     println!("{rendered}");
 
     Ok(())
@@ -132,8 +132,13 @@ mod tests {
             panes: Vec::new(),
         };
 
-        let rendered = render_output(&report, OutputFormat::Json, format_text_report)
-            .expect("json rendering should succeed");
+        let rendered = render_output(
+            &report,
+            OutputFormat::Json,
+            format_text_report,
+            format_text_report,
+        )
+        .expect("json rendering should succeed");
         assert!(rendered.contains("\"in_tmux\": false"));
     }
 }

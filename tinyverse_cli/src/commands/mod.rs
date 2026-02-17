@@ -1,3 +1,4 @@
+pub mod attach;
 pub mod config;
 pub mod debug;
 pub mod kill;

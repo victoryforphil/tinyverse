@@ -1,8 +1,9 @@
 use clap::{Parser, Subcommand};
 
 use crate::commands::{
-    config::command::ConfigCommands, debug::args::DebugCommands, kill::args::KillArgs,
-    send::args::SendArgs, spawn::args::SpawnArgs, view::args::ViewArgs,
+    attach::args::AttachArgs, config::command::ConfigCommands, debug::args::DebugCommands,
+    kill::args::KillArgs, list::args::ListArgs, send::args::SendArgs, spawn::args::SpawnArgs,
+    view::args::ViewArgs,
 };
 
 #[derive(Debug, Parser)]
@@ -29,9 +30,11 @@ pub enum Commands {
     /// Show tinyverse data directory
     Path,
     /// List known tinyverse sessions
-    List,
+    List(ListArgs),
     /// Spawn a new tinyverse session
     Spawn(SpawnArgs),
+    /// Attach to a tinyverse session by id or name
+    Attach(AttachArgs),
     /// Kill a tinyverse session by id or name
     Kill(KillArgs),
     /// View panel text buffer
