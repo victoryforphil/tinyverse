@@ -1,21 +1,20 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 1463
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
 ╭ Sessions ──────────────────────────────────────────────────────────╮╭ Console ───────────────────────────────────────╮
 │                                                                    ││ 1  Cons   2  Agent   3  Chat                   │
 │  ┌ tinyverse_alpha ────────────── X ┐                              ││Loading console preview...                      │
-│  │ key: tinyverse_alpha             │                              ││                                                │
-│  │ active   opencode                │                              ││                                                │
-│  │ tmux: tinyverse_alpha            │                              ││                                                │
+│  │  active   opencode   0 msg       │                              ││                                                │
+│  │ Jan 01 00:00 · openai/gpt-5.…    │                              ││                                                │
+│  │                                  │                              ││                                                │
+│  │                                  │                              ││                                                │
+│  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  └──────────────────────────────────┘                              ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
 │                                                                    ││                                                │
 │                              ╭ Confirm Kill ──────────────────────────────────────────╮                              │
 │                              │Kill session `tinyverse_alpha`?                         │                              │
@@ -38,4 +37,4 @@ tinyverse tui  |  1 session(s)
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- y/enter  confirm |  n/esc  cancel | Placholder Typing.... | never refreshed
+ y/enter  confirm |  n/esc  cancel | never refreshed

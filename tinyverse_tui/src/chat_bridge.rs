@@ -1,3 +1,6 @@
+use std::io::{BufRead, BufReader};
+use std::sync::mpsc::{Receiver, Sender, TryRecvError, channel};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
@@ -5,10 +8,11 @@ use reqwest::Method;
 use reqwest::blocking::Client;
 use serde_json::{Value, json};
 
-use crate::chat::{ChatMessage, ChatMessageRole, ChatState};
+use crate::chat::{ChatMessage, ChatMessagePart, ChatMessageRole, ChatState};
 
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:4096";
 const DEFAULT_SYNC_INTERVAL: Duration = Duration::from_secs(4);
+const DEFAULT_EVENT_SYNC_INTERVAL: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatConnectionMode {
@@ -52,6 +56,17 @@ struct OpencodeSnapshot {
     messages: Vec<ChatMessage>,
     models: Vec<String>,
     agents: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+enum RealtimeEvent {
+    Connected,
+    Disconnected,
+    Error(String),
+    Update {
+        event_type: String,
+        session_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -264,22 +279,29 @@ impl OpencodeClient {
                     })
                     .unwrap_or_else(now_label);
 
-                let text = record
+                let mut parts = record
                     .get("parts")
-                    .map(extract_message_text)
-                    .filter(|value| !value.trim().is_empty())
-                    .or_else(|| {
-                        record
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .map(ToOwned::to_owned)
-                    })
-                    .unwrap_or_else(|| String::from("(empty message)"));
+                    .map(extract_message_parts)
+                    .unwrap_or_default();
+                if parts.is_empty()
+                    && let Some(text) = record
+                        .get("text")
+                        .or_else(|| record.get("content"))
+                        .and_then(Value::as_str)
+                {
+                    parts = split_text_and_code_parts(text);
+                }
+
+                if parts.is_empty() {
+                    parts.push(ChatMessagePart::Text(String::from("(empty message)")));
+                }
+                let text = flatten_message_parts(&parts);
 
                 ChatMessage {
                     id,
                     role,
                     text,
+                    parts,
                     created_at,
                 }
             })
@@ -412,11 +434,16 @@ impl OpencodeClient {
 
 pub struct ChatBridge {
     opencode: Option<OpencodeClient>,
+    realtime_rx: Option<Receiver<RealtimeEvent>>,
+    realtime_connected: bool,
     active_session_id: Option<String>,
     mode: ChatConnectionMode,
     mode_detail: String,
     last_sync_at: Option<Instant>,
+    last_event_sync_at: Option<Instant>,
+    pending_realtime_refresh: bool,
     sync_interval: Duration,
+    event_sync_interval: Duration,
 }
 
 impl ChatBridge {
@@ -427,6 +454,7 @@ impl ChatBridge {
             .unwrap_or_else(|| String::from("."));
 
         let opencode = OpencodeClient::from_env(directory).ok().flatten();
+        let realtime_rx = opencode.as_ref().map(spawn_realtime_worker);
         let mode = if opencode.is_some() {
             ChatConnectionMode::TmuxFallback
         } else {
@@ -435,11 +463,16 @@ impl ChatBridge {
 
         Self {
             opencode,
+            realtime_rx,
+            realtime_connected: false,
             active_session_id: None,
             mode,
             mode_detail: String::from("waiting for sync"),
             last_sync_at: None,
+            last_event_sync_at: None,
+            pending_realtime_refresh: false,
             sync_interval: DEFAULT_SYNC_INTERVAL,
+            event_sync_interval: DEFAULT_EVENT_SYNC_INTERVAL,
         }
     }
 
@@ -451,6 +484,24 @@ impl ChatBridge {
     }
 
     pub fn sync_if_due(&mut self, chat: &mut ChatState) {
+        if self.consume_realtime_events() {
+            self.pending_realtime_refresh = true;
+        }
+
+        if self.pending_realtime_refresh {
+            let ready_for_event_sync = self
+                .last_event_sync_at
+                .map(|instant| instant.elapsed() >= self.event_sync_interval)
+                .unwrap_or(true);
+
+            if ready_for_event_sync {
+                self.last_event_sync_at = Some(Instant::now());
+                self.pending_realtime_refresh = false;
+                self.sync_now(chat);
+            }
+            return;
+        }
+
         if self
             .last_sync_at
             .map(|instant| instant.elapsed() < self.sync_interval)
@@ -494,7 +545,11 @@ impl ChatBridge {
                     .map(|session| session.title.clone())
                     .unwrap_or_else(|| String::from("unknown"));
                 self.mode = ChatConnectionMode::OpencodeApi;
-                self.mode_detail = format!("OpenCode session: {session_label}");
+                self.mode_detail = if self.realtime_connected {
+                    format!("OpenCode session: {session_label} (sse)")
+                } else {
+                    format!("OpenCode session: {session_label}")
+                };
             }
             Err(error) => {
                 self.mode = ChatConnectionMode::TmuxFallback;
@@ -546,6 +601,225 @@ impl ChatBridge {
             }
         }
     }
+}
+
+fn spawn_realtime_worker(opencode: &OpencodeClient) -> Receiver<RealtimeEvent> {
+    let (tx, rx) = channel();
+    let client = opencode.clone();
+
+    thread::spawn(move || {
+        loop {
+            match stream_realtime_once(&client, &tx) {
+                Ok(()) => {
+                    let _ = tx.send(RealtimeEvent::Disconnected);
+                }
+                Err(error) => {
+                    let _ = tx.send(RealtimeEvent::Error(error.to_string()));
+                }
+            }
+            thread::sleep(Duration::from_secs(2));
+        }
+    });
+
+    rx
+}
+
+fn stream_realtime_once(opencode: &OpencodeClient, tx: &Sender<RealtimeEvent>) -> Result<()> {
+    let mut request = opencode
+        .http
+        .request(Method::GET, format!("{}/event", opencode.base_url))
+        .query(&[("directory", &opencode.directory)])
+        .header(reqwest::header::ACCEPT, "text/event-stream");
+
+    if let Some(password) = opencode.password.as_ref() {
+        request = request.basic_auth(&opencode.username, Some(password));
+    }
+
+    let response = request.send().context("OpenCode realtime connect failed")?;
+    if !response.status().is_success() {
+        bail!("OpenCode realtime status {}", response.status().as_u16());
+    }
+
+    let _ = tx.send(RealtimeEvent::Connected);
+
+    let mut reader = BufReader::new(response);
+    let mut line = String::new();
+    let mut current_event_type: Option<String> = None;
+    let mut current_data = String::new();
+
+    loop {
+        line.clear();
+        let bytes_read = reader
+            .read_line(&mut line)
+            .context("OpenCode realtime read failed")?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        while line.ends_with('\n') || line.ends_with('\r') {
+            line.pop();
+        }
+
+        if line.is_empty() {
+            dispatch_realtime_event(
+                tx,
+                current_event_type.take(),
+                std::mem::take(&mut current_data),
+            );
+            continue;
+        }
+
+        if line.starts_with(':') {
+            continue;
+        }
+
+        if let Some(value) = line.strip_prefix("event:") {
+            current_event_type = Some(value.trim().to_owned());
+            continue;
+        }
+
+        if let Some(value) = line.strip_prefix("data:") {
+            if !current_data.is_empty() {
+                current_data.push('\n');
+            }
+            current_data.push_str(value.trim_start());
+        }
+    }
+
+    if !current_data.trim().is_empty() || current_event_type.is_some() {
+        dispatch_realtime_event(tx, current_event_type.take(), current_data);
+    }
+
+    Ok(())
+}
+
+fn dispatch_realtime_event(
+    tx: &Sender<RealtimeEvent>,
+    current_event_type: Option<String>,
+    current_data: String,
+) {
+    if current_event_type.is_none() && current_data.trim().is_empty() {
+        return;
+    }
+
+    let payload = serde_json::from_str::<Value>(&current_data).ok();
+    let event_type = payload
+        .as_ref()
+        .and_then(|value| value.get("type"))
+        .and_then(Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| current_event_type)
+        .unwrap_or_else(|| String::from("event.unknown"));
+    let session_id = payload
+        .as_ref()
+        .and_then(|value| extract_session_id_for_event(value, &event_type));
+
+    let _ = tx.send(RealtimeEvent::Update {
+        event_type,
+        session_id,
+    });
+}
+
+impl ChatBridge {
+    fn consume_realtime_events(&mut self) -> bool {
+        let Some(rx) = self.realtime_rx.as_ref() else {
+            return false;
+        };
+
+        let mut needs_refresh = false;
+        loop {
+            match rx.try_recv() {
+                Ok(RealtimeEvent::Connected) => {
+                    self.realtime_connected = true;
+                }
+                Ok(RealtimeEvent::Disconnected) => {
+                    self.realtime_connected = false;
+                }
+                Ok(RealtimeEvent::Error(error)) => {
+                    self.realtime_connected = false;
+                    self.mode_detail = format!("OpenCode realtime error: {error}");
+                }
+                Ok(RealtimeEvent::Update {
+                    event_type,
+                    session_id,
+                }) => {
+                    if event_requires_refresh(
+                        &event_type,
+                        session_id.as_deref(),
+                        self.active_session_id.as_deref(),
+                    ) {
+                        needs_refresh = true;
+                    }
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.realtime_connected = false;
+                    break;
+                }
+            }
+        }
+
+        needs_refresh
+    }
+}
+
+fn event_requires_refresh(
+    event_type: &str,
+    session_id: Option<&str>,
+    active_session_id: Option<&str>,
+) -> bool {
+    if (event_type.starts_with("message.")
+        || event_type.starts_with("permission.")
+        || event_type.starts_with("question."))
+        && let Some(session_id) = session_id
+        && Some(session_id) != active_session_id
+    {
+        return false;
+    }
+
+    event_type.starts_with("message.")
+        || event_type.starts_with("session.")
+        || event_type.starts_with("permission.")
+        || event_type.starts_with("question.")
+        || event_type == "server.connected"
+}
+
+fn extract_session_id_for_event(value: &Value, event_type: &str) -> Option<String> {
+    if let Some(session) = value.get("session") {
+        if let Some(id) = session.get("id").and_then(Value::as_str) {
+            return Some(id.to_owned());
+        }
+        if let Some(id) = session.as_str() {
+            return Some(id.to_owned());
+        }
+    }
+
+    const POINTERS: [&str; 8] = [
+        "/sessionID",
+        "/sessionId",
+        "/session_id",
+        "/properties/sessionID",
+        "/properties/sessionId",
+        "/properties/session_id",
+        "/data/sessionID",
+        "/data/sessionId",
+    ];
+    for pointer in POINTERS {
+        if let Some(id) = value.pointer(pointer).and_then(Value::as_str) {
+            return Some(id.to_owned());
+        }
+    }
+
+    if event_type.starts_with("session.") {
+        if let Some(id) = value.get("id").and_then(Value::as_str) {
+            return Some(id.to_owned());
+        }
+        if let Some(id) = value.pointer("/properties/id").and_then(Value::as_str) {
+            return Some(id.to_owned());
+        }
+    }
+
+    None
 }
 
 fn unwrap_data(value: Value) -> Value {
@@ -645,51 +919,310 @@ fn extract_string_options(value: &Value, keys: &[&str]) -> Vec<String> {
     output
 }
 
-fn extract_message_text(value: &Value) -> String {
+fn extract_message_parts(value: &Value) -> Vec<ChatMessagePart> {
     let Some(parts) = value.as_array() else {
-        return String::new();
+        return Vec::new();
     };
 
-    let mut lines = Vec::new();
+    let mut output = Vec::new();
     for part in parts {
-        let part_type = part.get("type").and_then(Value::as_str).unwrap_or("text");
+        let part_type = part
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("text")
+            .trim()
+            .to_ascii_lowercase();
         match part_type {
-            "text" => {
-                if let Some(text) = part.get("text").and_then(Value::as_str) {
+            _ if matches!(
+                part_type.as_str(),
+                "text" | "assistant" | "message" | "markdown"
+            ) =>
+            {
+                if let Some(text) = part
+                    .get("text")
+                    .or_else(|| part.get("content"))
+                    .or_else(|| part.get("markdown"))
+                    .and_then(Value::as_str)
+                {
+                    output.extend(split_text_and_code_parts(text));
+                }
+            }
+            _ if matches!(part_type.as_str(), "thinking" | "reasoning") => {
+                if let Some(text) = part
+                    .get("text")
+                    .or_else(|| part.get("content"))
+                    .and_then(Value::as_str)
+                {
                     let trimmed = text.trim();
                     if !trimmed.is_empty() {
-                        lines.push(trimmed.to_owned());
+                        output.push(ChatMessagePart::Thinking(trimmed.to_owned()));
                     }
                 }
             }
-            "thinking" => {
-                if let Some(text) = part.get("text").and_then(Value::as_str) {
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        lines.push(format!("[thinking] {trimmed}"));
-                    }
-                }
-            }
-            "tool_call" => {
-                let tool = part
+            _ if matches!(part_type.as_str(), "tool" | "tool_call" | "toolcall") => {
+                let name = part
                     .get("tool")
                     .or_else(|| part.get("name"))
                     .and_then(Value::as_str)
-                    .unwrap_or("tool");
-                lines.push(format!("[tool:{tool}]"));
+                    .unwrap_or("tool")
+                    .to_owned();
+                let input = part
+                    .get("input")
+                    .or_else(|| part.get("args"))
+                    .map(pretty_json);
+                let output_text = part
+                    .get("output")
+                    .map(pretty_json)
+                    .filter(|value| !value.is_empty());
+
+                if matches!(name.as_str(), "bash" | "shell" | "terminal")
+                    && let Some(command) = part
+                        .get("input")
+                        .and_then(|value| value.get("command"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                {
+                    output.push(ChatMessagePart::ShellCommand(command.to_owned()));
+                    if let Some(shell_output) = output_text.clone() {
+                        output.push(ChatMessagePart::ShellOutput {
+                            output: shell_output,
+                            exit_code: part
+                                .get("output")
+                                .and_then(|value| value.get("exitCode"))
+                                .and_then(Value::as_i64),
+                        });
+                    }
+                } else {
+                    output.push(ChatMessagePart::ToolCall {
+                        name,
+                        input,
+                        output: output_text,
+                    });
+                }
+            }
+            _ if matches!(
+                part_type.as_str(),
+                "tool_result" | "tool_results" | "tool_output" | "result"
+            ) =>
+            {
+                let rendered = part
+                    .get("output")
+                    .or_else(|| part.get("text"))
+                    .or_else(|| part.get("content"))
+                    .map(pretty_json)
+                    .unwrap_or_default();
+                if !rendered.trim().is_empty() {
+                    output.push(ChatMessagePart::ShellOutput {
+                        output: rendered,
+                        exit_code: part.get("exitCode").and_then(Value::as_i64),
+                    });
+                }
+            }
+            _ if matches!(part_type.as_str(), "command" | "shell" | "bash") => {
+                let command = part
+                    .get("command")
+                    .or_else(|| part.get("text"))
+                    .or_else(|| part.get("content"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned);
+                if let Some(command) = command {
+                    output.push(ChatMessagePart::ShellCommand(command));
+                }
+                let shell_output = part
+                    .get("output")
+                    .or_else(|| part.get("result"))
+                    .map(pretty_json)
+                    .unwrap_or_default();
+                if !shell_output.trim().is_empty() {
+                    output.push(ChatMessagePart::ShellOutput {
+                        output: shell_output,
+                        exit_code: part.get("exitCode").and_then(Value::as_i64),
+                    });
+                }
+            }
+            _ if matches!(part_type.as_str(), "code" | "code_block" | "patch" | "diff") => {
+                let code = part
+                    .get("code")
+                    .or_else(|| part.get("text"))
+                    .or_else(|| part.get("content"))
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned);
+                if let Some(code) = code {
+                    let language = part
+                        .get("language")
+                        .or_else(|| part.get("lang"))
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToOwned::to_owned);
+                    output.push(ChatMessagePart::Code { language, code });
+                }
+            }
+            _ if part_type == "error" => {
+                let text = part
+                    .get("text")
+                    .or_else(|| part.get("message"))
+                    .or_else(|| part.get("content"))
+                    .map(pretty_json)
+                    .unwrap_or_else(|| String::from("unknown error"));
+                output.push(ChatMessagePart::Error(text));
             }
             _ => {
-                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                if let Some(text) = part
+                    .get("text")
+                    .or_else(|| part.get("content"))
+                    .or_else(|| part.get("output"))
+                    .and_then(Value::as_str)
+                {
                     let trimmed = text.trim();
                     if !trimmed.is_empty() {
-                        lines.push(trimmed.to_owned());
+                        output.extend(split_text_and_code_parts(trimmed));
                     }
                 }
             }
         }
     }
 
-    lines.join("\n")
+    output
+}
+
+fn split_text_and_code_parts(value: &str) -> Vec<ChatMessagePart> {
+    let mut parts = Vec::new();
+    let mut prose = String::new();
+    let mut in_code_fence = false;
+    let mut fence_language: Option<String> = None;
+    let mut code = String::new();
+
+    for line in value.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            let language = trimmed.trim_start_matches("```").trim().to_string();
+            if in_code_fence {
+                let finalized = code.trim_end().to_owned();
+                if !finalized.is_empty() {
+                    parts.push(ChatMessagePart::Code {
+                        language: fence_language.clone(),
+                        code: finalized,
+                    });
+                }
+                in_code_fence = false;
+                code.clear();
+                fence_language = None;
+            } else {
+                push_text_or_markdown_part(&mut parts, &prose);
+                prose.clear();
+                in_code_fence = true;
+                fence_language = if language.is_empty() {
+                    None
+                } else {
+                    Some(language)
+                };
+            }
+            continue;
+        }
+
+        if in_code_fence {
+            if !code.is_empty() {
+                code.push('\n');
+            }
+            code.push_str(line);
+        } else {
+            if !prose.is_empty() {
+                prose.push('\n');
+            }
+            prose.push_str(line);
+        }
+    }
+
+    if in_code_fence {
+        let finalized = code.trim_end().to_owned();
+        if !finalized.is_empty() {
+            parts.push(ChatMessagePart::Code {
+                language: fence_language,
+                code: finalized,
+            });
+        }
+    }
+
+    push_text_or_markdown_part(&mut parts, &prose);
+    parts
+}
+
+fn push_text_or_markdown_part(parts: &mut Vec<ChatMessagePart>, text: &str) {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    if looks_like_markdown(trimmed) {
+        parts.push(ChatMessagePart::Markdown(trimmed.to_owned()));
+    } else {
+        parts.push(ChatMessagePart::Text(trimmed.to_owned()));
+    }
+}
+
+fn looks_like_markdown(value: &str) -> bool {
+    value.lines().any(|line| {
+        let trimmed = line.trim_start();
+        trimmed.starts_with('#')
+            || trimmed.starts_with("- ")
+            || trimmed.starts_with("* ")
+            || trimmed.starts_with("1. ")
+            || trimmed.starts_with("```")
+            || trimmed.contains("**")
+            || trimmed.contains('`')
+    })
+}
+
+fn flatten_message_parts(parts: &[ChatMessagePart]) -> String {
+    let mut chunks = Vec::new();
+    for part in parts {
+        match part {
+            ChatMessagePart::Text(value)
+            | ChatMessagePart::Markdown(value)
+            | ChatMessagePart::Thinking(value)
+            | ChatMessagePart::ShellCommand(value)
+            | ChatMessagePart::Error(value) => {
+                chunks.push(value.trim().to_owned());
+            }
+            ChatMessagePart::Code { code, .. } => {
+                chunks.push(code.trim().to_owned());
+            }
+            ChatMessagePart::ToolCall {
+                name,
+                input,
+                output,
+            } => {
+                chunks.push(format!("[tool:{name}]"));
+                if let Some(value) = input {
+                    chunks.push(value.trim().to_owned());
+                }
+                if let Some(value) = output {
+                    chunks.push(value.trim().to_owned());
+                }
+            }
+            ChatMessagePart::ShellOutput { output, .. } => {
+                chunks.push(output.trim().to_owned());
+            }
+        }
+    }
+
+    chunks
+        .into_iter()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn pretty_json(value: &Value) -> String {
+    if let Some(text) = value.as_str() {
+        return text.trim().to_owned();
+    }
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
 fn parse_unix(value: &Value) -> Option<i64> {

@@ -1,21 +1,20 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 1452
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
 ╭ Sessions ──────────────────────────────────────────────────────────╮╭ Console ───────────────────────────────────────╮
 │                                                                    ││ 1  Cons   2  Agent   3  Chat                   │
 │  ┌ tinyverse_alpha ────────────── X ┐                              ││Loading console preview...                      │
-│  │ key: tinyverse_alpha             │                              ││                                                │
-│  │ active   opencode                │                              ││                                                │
-│  │ tmux: tinyverse_alpha            │                              ││                                                │
+│  │  active   opencode   0 msg       │                              ││                                                │
+│  │ Jan 01 00:00 · openai/gpt-5.…    │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
-│  └──────────────────────────────────┘                              ││                                                │
-│                                     ╭ Actions ─────────────────────────────────╮                                     │
-│                                     │ ▸  s  Spawn new session                  │                                     │
+│  │                                  │                              ││                                                │
+│  │                                  │                              ││                                                │
+│  │                                  ╭ Actions ─────────────────────────────────╮                                     │
+│  └──────────────────────────────────│ ▸  s  Spawn new session                  │                                     │
 │                                     │ r  Refresh sessions                      │                                     │
 │                                     │ i  Toggle inspector                      │                                     │
 │                                     │ a  Attach selected session               │                                     │
@@ -38,4 +37,4 @@ tinyverse tui  |  1 session(s)
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- enter  submit |  esc  cancel | Placholder Typing.... | never refreshed
+ enter  submit |  esc  cancel | never refreshed

@@ -1,0 +1,6 @@
+- Add explicit bypass modes when a command can target multiple backends (for example DB vs direct tmux), and enforce clear flag semantics (`conflicts_with`, `--all`, interactive fallback) so behavior stays predictable.
+- Keep operator UX consistent across modes: when a required target is omitted, offer interactive selection; when no targets exist, return a clear no-op message instead of a hard failure.
+- Store refresh settings in human-friendly units (Hz) at config level, but convert once at runtime boundaries (Hz -> ms) with clamping (`max(1)`) to prevent zero or invalid intervals.
+- Preserve backward compatibility during unit migrations by supporting a legacy override path and defining precedence explicitly (legacy arg > new arg > config default).
+- Treat periodic refresh paths as read-only observers: avoid mutating live tmux pane state (for example pane resize) during preview capture, because polling loops amplify side effects.
+- For optional tmux capture capabilities (alternate screen), use best-effort retries: attempt richer capture first, then automatically fall back to baseline flags on command failure.

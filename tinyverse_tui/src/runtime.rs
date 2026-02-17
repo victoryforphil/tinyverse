@@ -85,10 +85,11 @@ fn run_loop(
             events::handle_event(ev, terminal, app, store)?;
         }
 
+        events::refresh_chat_bridge(app, false);
+
         if Instant::now() >= next_refresh_at {
             app.refresh(store)?;
             events::refresh_selected_preview(app);
-            events::refresh_chat_bridge(app, false);
             next_refresh_at = Instant::now() + app.options.refresh_interval;
         }
     }

@@ -1,4 +1,5 @@
 - When flattening crate module structure (for example removing a wrapper module like `cli`), update both file paths and all Rust module references/imports in the same change.
 - Prefer short Rust imports (`use` aliases or `super::...`) over deep fully-qualified paths to keep command handlers easy to read.
 - For Rust test runs in this repo, prefer `cargo nextest run`; if `nextest` is unavailable or fails due to environment/tooling issues, fall back to `cargo test` and state the reason.
+- When codifying a `cargo nextest` testing preference, align setup by ensuring `scripts/install.sh.ts` installs `cargo-nextest`.
 - Keep final user-facing completion reports concise by default: short bullets with high-level changes, key fixes/challenges, docs updated, testing pass/fail, usage/run note, and optional next steps.

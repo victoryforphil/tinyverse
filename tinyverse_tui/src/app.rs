@@ -10,8 +10,6 @@ use crate::chat::ChatState;
 use crate::chat_bridge::ChatBridge;
 use crate::theme::UiTheme;
 
-pub const DEFAULT_STATUS_PLACEHOLDER: &str = "Placholder Typing....";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
     Normal,
@@ -338,7 +336,7 @@ impl App {
             pane_preview_cache: HashMap::new(),
             footer_hover_action: None,
             should_quit: false,
-            status_message: String::from(DEFAULT_STATUS_PLACEHOLDER),
+            status_message: String::new(),
             last_refresh_at: None,
             layout: LayoutCache::default(),
         }
@@ -356,9 +354,7 @@ impl App {
             if self.selected_index >= self.sessions.len() {
                 self.selected_index = self.sessions.len() - 1;
             }
-            if self.status_message.trim().is_empty() || self.status_message == "No sessions found" {
-                self.status_message = String::from(DEFAULT_STATUS_PLACEHOLDER);
-            }
+            self.status_message = format!("Loaded {} session(s)", self.sessions.len());
         }
         self.last_refresh_at = Some(Instant::now());
         Ok(())

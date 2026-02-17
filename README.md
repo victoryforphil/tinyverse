@@ -49,6 +49,9 @@
   1. `~/.tinyverse/config.toml` (or legacy `~/.tinyverse/tinyverse.toml`)
   2. active home config (`<tinyverse_home>/config.toml`, legacy fallback if needed)
 - `tinyverse config export` writes the effective config to disk (defaults to `active_path`) and prints metadata comments (`selected_source`, `active_path`, `written_to`, `loaded_from`) so you can verify exactly which file(s) were used.
+- TUI theme file: `theme.toml`
+  - Loaded from `~/.tinyverse/theme.toml` first, then cwd `./theme.toml` (cwd overrides matching keys).
+  - Supports Dark-Factory style palette keys such as `pill_ok_fg`, `pill_ok_bg`, `pane_focused_border`, `text_secondary`, and `selected_card_bg`.
 
 ## Testing
 

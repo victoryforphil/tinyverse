@@ -64,7 +64,78 @@ pub struct ChatMessage {
     pub id: Option<String>,
     pub role: ChatMessageRole,
     pub text: String,
+    pub parts: Vec<ChatMessagePart>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum ChatMessagePart {
+    Text(String),
+    Markdown(String),
+    Thinking(String),
+    Code {
+        language: Option<String>,
+        code: String,
+    },
+    ToolCall {
+        name: String,
+        input: Option<String>,
+        output: Option<String>,
+    },
+    ShellCommand(String),
+    ShellOutput {
+        output: String,
+        exit_code: Option<i64>,
+    },
+    Error(String),
+}
+
+impl ChatMessagePart {
+    pub fn preview_line(&self) -> Option<&str> {
+        match self {
+            Self::Text(value)
+            | Self::Markdown(value)
+            | Self::Thinking(value)
+            | Self::ShellCommand(value)
+            | Self::Error(value) => first_nonempty_line(value),
+            Self::Code { code, .. } => first_nonempty_line(code),
+            Self::ToolCall {
+                name,
+                input,
+                output,
+            } => {
+                if let Some(value) = input.as_deref().and_then(first_nonempty_line) {
+                    return Some(value);
+                }
+                if let Some(value) = output.as_deref().and_then(first_nonempty_line) {
+                    return Some(value);
+                }
+                Some(name)
+            }
+            Self::ShellOutput { output, .. } => first_nonempty_line(output),
+        }
+    }
+}
+
+impl ChatMessage {
+    pub fn preview_line(&self) -> String {
+        if let Some(line) = self
+            .parts
+            .iter()
+            .find_map(ChatMessagePart::preview_line)
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+        {
+            return line.to_owned();
+        }
+
+        self.text
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or(self.text.as_str())
+            .trim()
+            .to_owned()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -296,7 +367,8 @@ impl ChatState {
         self.messages.push(ChatMessage {
             id: None,
             role,
-            text,
+            text: text.clone(),
+            parts: vec![ChatMessagePart::Text(text)],
             created_at: now_label(),
         });
         self.scroll_lines = 0;
@@ -713,6 +785,10 @@ fn with_cursor_tail(value: &str, cursor: usize) -> String {
     }
 
     out
+}
+
+fn first_nonempty_line(value: &str) -> Option<&str> {
+    value.lines().find(|line| !line.trim().is_empty())
 }
 
 fn current_composer_trigger(value: &str, cursor_index: usize) -> Option<(char, String, usize)> {

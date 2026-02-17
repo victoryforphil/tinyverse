@@ -19,6 +19,12 @@ await runCommandSteps([
     cwd: repoRoot,
   },
   {
+    name: "Install cargo-nextest",
+    command: "cargo",
+    args: ["install", "cargo-nextest", "--locked"],
+    cwd: repoRoot,
+  },
+  {
     name: "Install Diesel CLI (sqlite)",
     command: "cargo",
     args: [

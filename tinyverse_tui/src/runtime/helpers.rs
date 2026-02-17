@@ -1,6 +1,6 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::Span;
 use ratatui::widgets::{Block, BorderType, Borders};
 
 use crate::theme::UiTheme;
@@ -31,19 +31,20 @@ pub fn status_pill(status: &str, theme: &UiTheme) -> Span<'static> {
         "dead" => (theme.pill_err_fg, theme.pill_err_bg),
         _ => (theme.pill_muted_fg, theme.pill_muted_bg),
     };
-    Span::styled(
-        format!(" {} ", lowered),
-        Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
-    )
+    pill_badge(&lowered, fg, bg, true)
 }
 
 pub fn tag_pill(label: &str, theme: &UiTheme) -> Span<'static> {
-    Span::styled(
-        format!(" {} ", label),
-        Style::default()
-            .fg(theme.pill_accent_fg)
-            .bg(theme.pill_accent_bg),
-    )
+    pill_badge(label, theme.pill_accent_fg, theme.pill_accent_bg, false)
+}
+
+pub fn pill_badge(label: &str, fg: Color, bg: Color, bold: bool) -> Span<'static> {
+    let mut style = Style::default().fg(fg).bg(bg);
+    if bold {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+
+    Span::styled(format!(" {} ", label), style)
 }
 
 pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
@@ -95,16 +96,6 @@ pub fn inset_rect(area: Rect, horizontal: u16, vertical: u16) -> Rect {
         width,
         height,
     }
-}
-
-pub fn line_kv(label: &str, value: &str, theme: &UiTheme) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(
-            format!("{}: ", label),
-            Style::default().fg(theme.text_muted),
-        ),
-        Span::styled(value.to_owned(), Style::default().fg(theme.text_secondary)),
-    ])
 }
 
 pub fn key_hint(key: &str, action: &str, theme: &UiTheme) -> Vec<Span<'static>> {

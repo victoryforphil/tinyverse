@@ -29,7 +29,7 @@ Minimal guidance for coding agents in `tinyverse`.
 ## Setup
 
 - Install managed tools: `proto install`
-- Run installer script: `scripts/install.sh.ts`
+- Run installer script: `scripts/install.sh.ts` (installs Moon deps plus Rust CLIs including `cargo-nextest` and `diesel_cli`)
 
 ## Build / Lint / Test
 
@@ -39,7 +39,7 @@ Current state:
 - Rust CLI tests are available in `tinyverse_cli`.
 
 Testing preference:
-- Rust test execution prefers `cargo nextest run`, with automatic fallback to `cargo test` when nextest is unavailable.
+- Rust test execution prefers `cargo nextest run`, with automatic fallback to `cargo test` when nextest is unavailable or cannot run due to tooling/environment issues.
 - Wrapper script: `scripts/helpers/test_rust.sh.ts` (passes all args transparently).
 - Via Moon: `moon run tinyverse_lib:test` or `moon :test` (uses wrapper internally).
 

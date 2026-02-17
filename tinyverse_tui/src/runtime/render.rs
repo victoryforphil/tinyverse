@@ -8,15 +8,15 @@ use crate::app::{
     ACTION_MENU_DANGER_SPLIT_AFTER, App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction,
     SidebarTab,
 };
-use crate::chat::{ChatMessageRole, ComposerAutocompleteMode};
+use crate::chat::{ChatMessagePart, ChatMessageRole, ComposerAutocompleteMode};
 
 use super::helpers::{
-    anchored_rect, centered_rect, inset_rect, key_hint, line_kv, status_pill, styled_panel,
-    tag_pill, truncate_to,
+    anchored_rect, centered_rect, inset_rect, key_hint, status_pill, styled_panel, tag_pill,
+    truncate_to,
 };
 
 const CARD_WIDTH: u16 = 36;
-const CARD_HEIGHT: u16 = 8;
+const CARD_HEIGHT: u16 = 10;
 const CARD_GAP_X: u16 = 2;
 const CARD_GAP_Y: u16 = 1;
 const CHAT_COMPOSER_HEIGHT: u16 = 6;
@@ -212,7 +212,13 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border_color))
             .title(Line::from(vec![Span::styled(
-                format!(" {} ", truncate_to(&session.session_name, 24)),
+                format!(
+                    " {} ",
+                    truncate_to(
+                        &session.session_name,
+                        card_area.width.saturating_sub(12).max(10) as usize,
+                    )
+                ),
                 title_style,
             )]));
 
@@ -246,26 +252,56 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         }
 
         let card_inner = inset_rect(inner, 1, 0);
+        let max_preview_width = card_area.width.saturating_sub(6).max(8) as usize;
 
-        let body = Paragraph::new(vec![
-            line_kv("key", &truncate_to(&session.session_key, 24), &app.theme),
+        let created = session.created_at.format("%b %d %H:%M").to_string();
+
+        let mut card_lines = vec![
             Line::from(vec![
                 status_pill(&session.status_string, &app.theme),
                 Span::raw(" "),
-                tag_pill(&truncate_to(&session.agent_type, 14), &app.theme),
+                tag_pill(&truncate_to(&session.agent_type, 12), &app.theme),
+                Span::raw(" "),
+                Span::styled(
+                    format!(" {} msg ", app.chat.messages.len()),
+                    Style::default()
+                        .fg(app.theme.pill_info_fg)
+                        .bg(app.theme.pill_info_bg),
+                ),
             ]),
-            line_kv(
-                "tmux",
-                &truncate_to(&session.tmux_session_name, 20),
-                &app.theme,
-            ),
-        ])
-        .style(if is_selected {
+            Line::from(Span::styled(
+                format!(
+                    "{} · {}",
+                    truncate_to(&created, 14),
+                    truncate_to(&app.chat.active_model, 14)
+                ),
+                Style::default().fg(app.theme.text_secondary),
+            )),
+        ];
+
+        let preview_lines = if is_selected { 3usize } else { 1 };
+        if let Some(preview_text) = latest_assistant_preview(app) {
+            card_lines.push(Line::from(Span::styled(
+                "─".repeat(max_preview_width.min(card_inner.width as usize)),
+                Style::default().fg(app.theme.pane_unfocused_border),
+            )));
+            for line in preview_excerpt_lines(&preview_text, max_preview_width, preview_lines) {
+                card_lines.push(Line::from(Span::styled(
+                    format!("{line}"),
+                    if is_selected {
+                        Style::default().fg(app.theme.text_primary)
+                    } else {
+                        Style::default().fg(app.theme.text_muted)
+                    },
+                )));
+            }
+        }
+
+        let body = Paragraph::new(card_lines).style(if is_selected {
             Style::default().bg(app.theme.selected_card_bg)
         } else {
             Style::default()
-        })
-        .wrap(Wrap { trim: true });
+        });
 
         frame.render_widget(body, card_inner);
     }
@@ -530,11 +566,17 @@ fn render_chat_messages(frame: &mut Frame, area: Rect, app: &mut App) {
                 Style::default().fg(app.theme.text_muted),
             ),
         ]));
-        for text_line in message.text.lines() {
-            lines.push(Line::from(Span::styled(
-                text_line.to_owned(),
-                Style::default().fg(app.theme.text_secondary),
-            )));
+        if message.parts.is_empty() {
+            for text_line in message.text.lines() {
+                lines.push(Line::from(Span::styled(
+                    text_line.to_owned(),
+                    Style::default().fg(app.theme.text_secondary),
+                )));
+            }
+        } else {
+            for part in &message.parts {
+                lines.extend(render_chat_part_lines(part, app, inner.width));
+            }
         }
         lines.push(Line::from(""));
     }
@@ -555,6 +597,136 @@ fn render_chat_messages(frame: &mut Frame, area: Rect, app: &mut App) {
         .take(max_lines)
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(visible).wrap(Wrap { trim: false }), inner);
+}
+
+fn render_chat_part_lines(part: &ChatMessagePart, app: &App, width: u16) -> Vec<Line<'static>> {
+    let max = width.saturating_sub(4) as usize;
+    match part {
+        ChatMessagePart::Text(value) => value
+            .lines()
+            .map(|line| {
+                Line::from(Span::styled(
+                    line.to_owned(),
+                    Style::default().fg(app.theme.text_secondary),
+                ))
+            })
+            .collect(),
+        ChatMessagePart::Markdown(value) => value
+            .lines()
+            .map(|line| {
+                let trimmed = line.trim_start();
+                let style = if trimmed.starts_with('#') {
+                    Style::default()
+                        .fg(app.theme.text_primary)
+                        .add_modifier(Modifier::BOLD)
+                } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+                    Style::default().fg(app.theme.pill_info_fg)
+                } else {
+                    Style::default().fg(app.theme.text_secondary)
+                };
+                Line::from(Span::styled(line.to_owned(), style))
+            })
+            .collect(),
+        ChatMessagePart::Thinking(value) => {
+            let mut out = vec![Line::from(Span::styled(
+                "🧠 Thinking",
+                Style::default()
+                    .fg(app.theme.pill_muted_fg)
+                    .add_modifier(Modifier::ITALIC),
+            ))];
+            for line in value.lines() {
+                out.push(Line::from(Span::styled(
+                    format!("  {line}"),
+                    Style::default()
+                        .fg(app.theme.text_muted)
+                        .add_modifier(Modifier::ITALIC),
+                )));
+            }
+            out
+        }
+        ChatMessagePart::Code { language, code } => {
+            let mut out = Vec::new();
+            let label = language.as_deref().unwrap_or("text");
+            out.push(Line::from(Span::styled(
+                format!("┌─ code ({label})"),
+                Style::default().fg(app.theme.pill_accent_fg),
+            )));
+            for line in code.lines() {
+                out.push(Line::from(Span::styled(
+                    format!("│ {}", truncate_to(line, max)),
+                    Style::default().fg(app.theme.text_primary),
+                )));
+            }
+            out.push(Line::from(Span::styled(
+                "└─",
+                Style::default().fg(app.theme.pill_accent_bg),
+            )));
+            out
+        }
+        ChatMessagePart::ToolCall {
+            name,
+            input,
+            output,
+        } => {
+            let mut out = vec![Line::from(Span::styled(
+                format!("⚙ Tool {name}"),
+                Style::default()
+                    .fg(app.theme.pill_info_fg)
+                    .add_modifier(Modifier::BOLD),
+            ))];
+            if let Some(input) = input {
+                for (index, line) in input.lines().enumerate() {
+                    let prefix = if index == 0 { "  ▸ in  " } else { "       " };
+                    out.push(Line::from(Span::styled(
+                        format!("{prefix}{}", truncate_to(line, max)),
+                        Style::default().fg(app.theme.text_muted),
+                    )));
+                }
+            }
+            if let Some(output) = output {
+                for (index, line) in output.lines().enumerate() {
+                    let prefix = if index == 0 { "  ▸ out " } else { "       " };
+                    out.push(Line::from(Span::styled(
+                        format!("{prefix}{}", truncate_to(line, max)),
+                        Style::default().fg(app.theme.text_secondary),
+                    )));
+                }
+            }
+            out
+        }
+        ChatMessagePart::ShellCommand(value) => vec![Line::from(Span::styled(
+            format!("❯ {}", truncate_to(value, max)),
+            Style::default()
+                .fg(app.theme.pill_warn_fg)
+                .add_modifier(Modifier::BOLD),
+        ))],
+        ChatMessagePart::ShellOutput { output, exit_code } => {
+            let mut out = Vec::new();
+            for line in output.lines() {
+                out.push(Line::from(Span::styled(
+                    format!("  ↳ {}", truncate_to(line, max)),
+                    Style::default().fg(app.theme.text_muted),
+                )));
+            }
+            if let Some(code) = exit_code {
+                let style = if *code == 0 {
+                    Style::default().fg(app.theme.pill_ok_fg)
+                } else {
+                    Style::default()
+                        .fg(app.theme.pill_err_fg)
+                        .add_modifier(Modifier::BOLD)
+                };
+                out.push(Line::from(Span::styled(format!("  exit {code}"), style)));
+            }
+            out
+        }
+        ChatMessagePart::Error(value) => vec![Line::from(Span::styled(
+            format!("✖ {}", truncate_to(value, max)),
+            Style::default()
+                .fg(app.theme.pill_err_fg)
+                .add_modifier(Modifier::BOLD),
+        ))],
+    }
 }
 
 fn render_chat_composer(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -993,14 +1165,18 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
         mode_hints.extend(footer_hint(*action, hovered, app));
     }
 
-    mode_hints.push(Span::styled(
-        " | ",
-        Style::default().fg(app.theme.key_hint_bracket_fg),
-    ));
-    mode_hints.push(Span::styled(
-        footer_status_message(app),
-        Style::default().fg(app.theme.text_primary),
-    ));
+    let status = footer_status_message(app);
+    if !status.is_empty() {
+        mode_hints.push(Span::styled(
+            " | ",
+            Style::default().fg(app.theme.key_hint_bracket_fg),
+        ));
+        mode_hints.push(Span::styled(
+            status,
+            Style::default().fg(app.theme.text_primary),
+        ));
+    }
+
     mode_hints.push(Span::styled(
         " | ",
         Style::default().fg(app.theme.key_hint_bracket_fg),
@@ -1016,26 +1192,70 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn footer_status_message(app: &App) -> String {
-    if let Some(last_assistant) = app
-        .chat
+    app.status_message.clone()
+}
+
+fn latest_assistant_preview(app: &App) -> Option<String> {
+    app.chat
         .messages
         .iter()
         .rev()
         .find(|message| message.role == ChatMessageRole::Assistant)
-    {
-        let preview_source = last_assistant
-            .text
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or(last_assistant.text.as_str())
-            .trim();
-        let preview = truncate_to(preview_source, 72);
-        let model = truncate_to(&app.chat.active_model, 24);
-        let agent = truncate_to(&app.chat.active_agent, 16);
-        return format!("{agent} · {model} · {preview}");
+        .map(|message| message.preview_line())
+}
+
+fn preview_excerpt_lines(text: &str, width: usize, max_lines: usize) -> Vec<String> {
+    if width == 0 || max_lines == 0 {
+        return Vec::new();
     }
 
-    app.status_message.clone()
+    let mut out = Vec::new();
+    for source in text.lines() {
+        let trimmed = source.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let mut current = String::new();
+        for word in trimmed.split_whitespace() {
+            let next_len = if current.is_empty() {
+                word.chars().count()
+            } else {
+                current.chars().count() + 1 + word.chars().count()
+            };
+
+            if next_len > width {
+                if !current.is_empty() {
+                    out.push(current.clone());
+                    if out.len() >= max_lines {
+                        return out;
+                    }
+                    current.clear();
+                }
+                if word.chars().count() > width {
+                    out.push(truncate_to(word, width));
+                    if out.len() >= max_lines {
+                        return out;
+                    }
+                } else {
+                    current.push_str(word);
+                }
+            } else {
+                if !current.is_empty() {
+                    current.push(' ');
+                }
+                current.push_str(word);
+            }
+        }
+
+        if !current.is_empty() {
+            out.push(current);
+            if out.len() >= max_lines {
+                return out;
+            }
+        }
+    }
+
+    out
 }
 
 fn render_action_menu(frame: &mut Frame, area: Rect, app: &mut App) {

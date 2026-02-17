@@ -201,33 +201,20 @@ impl TmuxClient {
 
     pub fn capture_pane(&self, options: CapturePaneOptions) -> Result<CapturedPane, TmuxError> {
         let pane_id = self.resolve_pane_id(&options.session, options.pane.as_ref())?;
-        let mut args = vec![
-            "capture-pane".to_owned(),
-            "-p".to_owned(),
-            "-J".to_owned(),
-            "-t".to_owned(),
-            pane_id.clone(),
-        ];
-
-        if options.preserve_ansi {
-            args.push("-e".to_owned());
-        }
-
-        if options.include_alternate_screen {
-            args.push("-a".to_owned());
-        }
-
-        if let Some(start_line) = options.start_line {
-            args.push("-S".to_owned());
-            args.push(start_line.to_string());
-        }
-
-        if let Some(end_line) = options.end_line {
-            args.push("-E".to_owned());
-            args.push(end_line.to_string());
-        }
-
-        let text = self.run_tmux(args)?;
+        let args = build_capture_pane_args(&pane_id, &options);
+        let text = match self.run_tmux(args) {
+            Ok(text) => text,
+            Err(error)
+                if options.include_alternate_screen
+                    && matches!(error, TmuxError::CommandFailed { .. }) =>
+            {
+                let mut fallback_options = options.clone();
+                fallback_options.include_alternate_screen = false;
+                let fallback_args = build_capture_pane_args(&pane_id, &fallback_options);
+                self.run_tmux(fallback_args)?
+            }
+            Err(error) => return Err(error),
+        };
 
         Ok(CapturedPane {
             session: options.session,
@@ -380,6 +367,36 @@ impl TmuxClient {
             stderr: bytes_to_clean_string(&output.stderr),
         })
     }
+}
+
+fn build_capture_pane_args(pane_id: &str, options: &CapturePaneOptions) -> Vec<String> {
+    let mut args = vec![
+        "capture-pane".to_owned(),
+        "-p".to_owned(),
+        "-J".to_owned(),
+        "-t".to_owned(),
+        pane_id.to_owned(),
+    ];
+
+    if options.preserve_ansi {
+        args.push("-e".to_owned());
+    }
+
+    if options.include_alternate_screen {
+        args.push("-a".to_owned());
+    }
+
+    if let Some(start_line) = options.start_line {
+        args.push("-S".to_owned());
+        args.push(start_line.to_string());
+    }
+
+    if let Some(end_line) = options.end_line {
+        args.push("-E".to_owned());
+        args.push(end_line.to_string());
+    }
+
+    args
 }
 
 impl Default for TmuxClient {
