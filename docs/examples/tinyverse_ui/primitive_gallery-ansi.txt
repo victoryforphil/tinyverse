@@ -1,0 +1,34 @@
+[1m[92m    Blocking[0m waiting for file lock on package cache
+[1m[92m    Finished[0m ]8;;https://doc.rust-lang.org/cargo/reference/profiles.html#default-profiles\`dev` profile [unoptimized + debuginfo]]8;;\ target(s) in 0.23s
+[1m[92m     Running[0m `target/debug/examples/primitive_gallery`
+[1;34m== Action Lines ==[0m
+[2m──────────────────[0m
+[[1;44;37mINFO   [0m] [34mScanning for tinyverse sessions[0m
+[[1;42;30mDONE   [0m] [32mSession tinyverse_213 attached[0m
+[[1;43;30mWARN   [0m] [33mSession tinyverse_old has no windows[0m
+[[1;41;37mERROR  [0m] [1;31mSession tinyverse_404 not found[0m
+
+[1;34m== Status Badges ==[0m
+[2m───────────────────[0m
+[1;42;30m ACTIVE [0m  [47;30m IDLE [0m  [1;41;37m FAILED [0m
+
+[1;34m== Session Details ==[0m
+[2m─────────────────────[0m
+[1;36mID[0m: $3
+[1;36mName[0m: tinyverse_213
+[1;36mStatus[0m: attached
+[1;36mWindows[0m: 2
+
+[1;34m== Session Table ==[0m
+[2m───────────────────[0m
+[1mID | NAME            | STATUS   | WINDOWS[0m
+---+-----------------+----------+--------
+$1 | tinyverse_alpha | attached |       2
+[2m$2 | tinyverse_beta  | idle     |       1[0m
+
+[[1;41;37mERROR  [0m] [1;31mUnable to attach to tinyverse_404[0m
+  [2mtmux session was not found on this host[0m
+[32mNext:[0m Run tinyverse list --all to see available sessions
+
+[36mSummary:[0m 2 active, 1 idle, 1 failed
+[32mNext:[0m Run tinyverse attach <name> to connect

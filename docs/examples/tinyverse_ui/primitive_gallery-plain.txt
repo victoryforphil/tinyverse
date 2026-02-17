@@ -1,0 +1,31 @@
+== Action Lines ==
+------------------
+[INFO   ] Scanning for tinyverse sessions
+[DONE   ] Session tinyverse_213 attached
+[WARN   ] Session tinyverse_old has no windows
+[ERROR  ] Session tinyverse_404 not found
+
+== Status Badges ==
+-------------------
+[ACTIVE]  [IDLE]  [FAILED]
+
+== Session Details ==
+---------------------
+ID: $3
+Name: tinyverse_213
+Status: attached
+Windows: 2
+
+== Session Table ==
+-------------------
+ID | NAME            | STATUS   | WINDOWS
+---+-----------------+----------+--------
+$1 | tinyverse_alpha | attached |       2
+$2 | tinyverse_beta  | idle     |       1
+
+[ERROR  ] Unable to attach to tinyverse_404
+  tmux session was not found on this host
+Next: Run tinyverse list --all to see available sessions
+
+Summary: 2 active, 1 idle, 1 failed
+Next: Run tinyverse attach <name> to connect

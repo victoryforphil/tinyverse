@@ -1,0 +1,17 @@
+---
+source: tinyverse_ui/tests/example_snapshots.rs
+expression: output
+---
+[1;34m== Sessions ==[0m
+[2m──────────────[0m
+[[1;44;37mINFO   [0m] [34mFound 3 tinyverse sessions[0m
+
+[1mID | NAME                                       | STATUS   | WINDOWS[0m
+---+--------------------------------------------+----------+--------
+$1 | tinyverse_alpha                            | attached |       3
+[2m$2 | tinyverse_beta                             | idle     |       1[0m
+$3 | tinyverse_long_project_name_for_truncation | attached |       2
+
+[1;42;30m 2 attached [0m  [47;30m 1 idle [0m
+[36mSummary:[0m 3 sessions (filtered by prefix tinyverse_)
+[32mNext:[0m Use --all to include every tmux session

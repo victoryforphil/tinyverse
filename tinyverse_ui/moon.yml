@@ -1,0 +1,40 @@
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+language: "rust"
+stack: "backend"
+type: "library"
+
+tasks:
+  install:
+    command: "cargo fetch"
+
+  build:
+    command: "cargo build -p tinyverse_ui --examples"
+    inputs:
+      - "src/**/*"
+      - "examples/**/*"
+      - "tests/**/*"
+      - "Cargo.toml"
+      - "/Cargo.toml"
+      - "/Cargo.lock"
+
+  check:
+    command: "cargo check -p tinyverse_ui --examples"
+    inputs:
+      - "src/**/*"
+      - "examples/**/*"
+      - "tests/**/*"
+      - "Cargo.toml"
+      - "/Cargo.toml"
+      - "/Cargo.lock"
+
+  test:
+    command: "sh"
+    args: ["-c", "cargo nextest run -p tinyverse_ui || cargo test -p tinyverse_ui"]
+    inputs:
+      - "src/**/*"
+      - "examples/**/*"
+      - "tests/**/*"
+      - "Cargo.toml"
+      - "/Cargo.toml"
+      - "/Cargo.lock"

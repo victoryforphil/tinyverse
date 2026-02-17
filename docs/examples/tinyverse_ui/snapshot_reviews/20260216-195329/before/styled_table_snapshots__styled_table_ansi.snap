@@ -1,0 +1,8 @@
+---
+source: tinyverse_ui/tests/styled_table_snapshots.rs
+expression: output
+---
+[1mID | NAME            | STATUS   | WINDOWS[0m
+---+-----------------+----------+--------
+$1 | tinyverse_alpha | attached |      12
+[2m$2 | tinyverse_beta  | idle     |       3[0m

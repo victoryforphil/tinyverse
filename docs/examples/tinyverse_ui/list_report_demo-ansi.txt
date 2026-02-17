@@ -1,0 +1,17 @@
+[1m[92m    Blocking[0m waiting for file lock on package cache
+[1m[92m    Blocking[0m waiting for file lock on build directory
+[1m[92m    Finished[0m ]8;;https://doc.rust-lang.org/cargo/reference/profiles.html#default-profiles\`dev` profile [unoptimized + debuginfo]]8;;\ target(s) in 0.19s
+[1m[92m     Running[0m `target/debug/examples/list_report_demo`
+[1;34m== Sessions ==[0m
+[2m──────────────[0m
+[[1;44;37mINFO   [0m] [34mFound 3 tinyverse sessions[0m
+
+[1mID | NAME                                       | STATUS   | WINDOWS[0m
+---+--------------------------------------------+----------+--------
+$1 | tinyverse_alpha                            | attached |       3
+[2m$2 | tinyverse_beta                             | idle     |       1[0m
+$3 | tinyverse_long_project_name_for_truncation | attached |       2
+
+[1;42;30m 2 attached [0m  [47;30m 1 idle [0m
+[36mSummary:[0m 3 sessions (filtered by prefix tinyverse_)
+[32mNext:[0m Use --all to include every tmux session

@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 nu-ansi-term = "0.50.3"
+
+[dev-dependencies]
+insta = "1.43.2"
