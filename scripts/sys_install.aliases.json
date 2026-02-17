@@ -1,0 +1,7 @@
+{
+  "sourceEnvVar": "TINYVERSE_SRC_PATH",
+  "aliases": {
+    "tinyverse": "tinyverse_cli",
+    "tvcli": "tinyverse_cli"
+  }
+}
