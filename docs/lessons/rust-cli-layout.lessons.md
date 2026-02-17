@@ -1,0 +1,2 @@
+- When flattening crate module structure (for example removing a wrapper module like `cli`), update both file paths and all Rust module references/imports in the same change.
+- Prefer short Rust imports (`use` aliases or `super::...`) over deep fully-qualified paths to keep command handlers easy to read.
