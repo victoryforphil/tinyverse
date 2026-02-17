@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use tinyverse_tui::{resolve_theme_selector, TuiRunOptions};
+use tinyverse_tui::{TuiRunOptions, resolve_theme_selector};
 
 use crate::commands::config::store;
 use crate::commands::tui::args::TuiArgs;

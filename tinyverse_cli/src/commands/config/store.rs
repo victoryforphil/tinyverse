@@ -98,6 +98,8 @@ pub struct OpencodeConfig {
 pub struct OpencodeServerConfig {
     #[serde(default = "default_opencode_server_enabled")]
     pub enabled: bool,
+    #[serde(default = "default_opencode_server_mode")]
+    pub mode: OpencodeServerMode,
     #[serde(default = "default_opencode_server_hostname")]
     pub hostname: String,
     #[serde(default = "default_opencode_server_port")]
@@ -118,6 +120,13 @@ pub enum TmuxLayoutDirection {
 pub enum TmuxLayoutPrimary {
     Agent,
     Console,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OpencodeServerMode {
+    Serve,
+    Web,
 }
 
 impl Default for TmuxConfig {
@@ -170,10 +179,17 @@ impl Default for OpencodeServerConfig {
     fn default() -> Self {
         Self {
             enabled: default_opencode_server_enabled(),
+            mode: default_opencode_server_mode(),
             hostname: default_opencode_server_hostname(),
             port: default_opencode_server_port(),
             tmux_session_name: default_opencode_server_tmux_session_name(),
         }
+    }
+}
+
+impl Default for OpencodeServerMode {
+    fn default() -> Self {
+        default_opencode_server_mode()
     }
 }
 
@@ -259,6 +275,7 @@ struct PartialOpencodeConfig {
 #[derive(Debug, Default, Deserialize)]
 struct PartialOpencodeServerConfig {
     enabled: Option<bool>,
+    mode: Option<OpencodeServerMode>,
     hostname: Option<String>,
     port: Option<u16>,
     tmux_session_name: Option<String>,
@@ -433,6 +450,9 @@ fn apply_partial(target: &mut TinyverseConfig, partial: PartialTinyverseConfig) 
         if let Some(enabled) = server.enabled {
             target.opencode.server.enabled = enabled;
         }
+        if let Some(mode) = server.mode {
+            target.opencode.server.mode = mode;
+        }
         if let Some(hostname) = server.hostname
             && !hostname.trim().is_empty()
         {
@@ -485,6 +505,10 @@ fn default_tui_refresh_hz() -> u16 {
 
 fn default_opencode_server_enabled() -> bool {
     true
+}
+
+fn default_opencode_server_mode() -> OpencodeServerMode {
+    OpencodeServerMode::Serve
 }
 
 fn default_opencode_server_hostname() -> String {

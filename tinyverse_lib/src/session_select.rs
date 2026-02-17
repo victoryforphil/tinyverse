@@ -1,8 +1,8 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use tinyverse_ui::format_display_name;
 
 use crate::{
-    select_required_arg, ArgSelectOption, RequiredArgSelectConfig, SessionStore, StoredSession,
+    ArgSelectOption, RequiredArgSelectConfig, SessionStore, StoredSession, select_required_arg,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

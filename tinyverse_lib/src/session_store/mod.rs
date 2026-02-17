@@ -8,10 +8,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
+use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 use log::{info, warn};
 
-use crate::dir_utils::{resolve_tinyverse_paths, TinyversePaths};
+use crate::dir_utils::{TinyversePaths, resolve_tinyverse_paths};
 use crate::tmux::{ListSessionsOptions, TmuxClient};
 
 use self::models::{AgentServiceRecord, NewAgentServiceRecord, NewSessionRecord, SessionRecord};

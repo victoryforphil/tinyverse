@@ -28,7 +28,7 @@ pub fn execute(args: SpawnArgs) -> Result<()> {
         .as_deref()
         .or(config.spawn.default_model.as_deref());
     let launch_prompt = resolve_launch_prompt(agent_key.as_str(), user_prompt.as_deref());
-    let managed_service = lookup_managed_opencode_service(&mut store)?;
+    let managed_service = lookup_managed_opencode_service(&mut store, config.opencode.server.mode)?;
     let merged_agent_args = merge_agent_args_with_managed_service(
         agent_key.as_str(),
         args.agent_args.as_deref(),
@@ -245,7 +245,10 @@ fn infer_agent_connection(agent_key: &str, command: &str) -> (Option<String>, Op
     }
 
     if let Some(base_url) = extract_attach_url(&tokens) {
-        return (Some(base_url), extract_arg_value(&tokens, "--session", "-s"));
+        return (
+            Some(base_url),
+            extract_arg_value(&tokens, "--session", "-s"),
+        );
     }
 
     let hostname =

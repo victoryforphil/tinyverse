@@ -1,6 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Args;
-use tinyverse_ui::{default_stdout_context, ActionLine, LabeledField, Panel, Tone};
+use tinyverse_ui::{ActionLine, LabeledField, Panel, Tone, default_stdout_context};
 
 use super::store;
 
@@ -59,6 +59,9 @@ pub fn execute(args: ConfigSetArgs) -> Result<()> {
         "opencode.server.enabled" => {
             config.opencode.server.enabled = parse_bool(value)?;
         }
+        "opencode.server.mode" => {
+            config.opencode.server.mode = parse_opencode_server_mode(value, key)?;
+        }
         "opencode.server.hostname" => {
             config.opencode.server.hostname = parse_required_string(value, key)?;
         }
@@ -69,7 +72,7 @@ pub fn execute(args: ConfigSetArgs) -> Result<()> {
             config.opencode.server.tmux_session_name = parse_required_string(value, key)?;
         }
         _ => bail!(
-            "unknown config key `{key}` (supported: shell.clean, workspace.default_dir, git.branch_prefix, spawn.default_agent, spawn.default_model, tmux.initial_window_width, tmux.initial_window_height, tmux.layout.direction, tmux.layout.primary, tmux.layout.secondary_percent, tui.refresh_hz, tui.theme, opencode.server.enabled, opencode.server.hostname, opencode.server.port, opencode.server.tmux_session_name)"
+            "unknown config key `{key}` (supported: shell.clean, workspace.default_dir, git.branch_prefix, spawn.default_agent, spawn.default_model, tmux.initial_window_width, tmux.initial_window_height, tmux.layout.direction, tmux.layout.primary, tmux.layout.secondary_percent, tui.refresh_hz, tui.theme, opencode.server.enabled, opencode.server.mode, opencode.server.hostname, opencode.server.port, opencode.server.tmux_session_name)"
         ),
     }
 
@@ -153,5 +156,13 @@ fn parse_layout_primary(value: &str, key: &str) -> Result<store::TmuxLayoutPrima
         "agent" => Ok(store::TmuxLayoutPrimary::Agent),
         "console" => Ok(store::TmuxLayoutPrimary::Console),
         _ => bail!("invalid value for `{key}`: expected `agent` or `console`"),
+    }
+}
+
+fn parse_opencode_server_mode(value: &str, key: &str) -> Result<store::OpencodeServerMode> {
+    match value {
+        "serve" => Ok(store::OpencodeServerMode::Serve),
+        "web" => Ok(store::OpencodeServerMode::Web),
+        _ => bail!("invalid value for `{key}`: expected `serve` or `web`"),
     }
 }

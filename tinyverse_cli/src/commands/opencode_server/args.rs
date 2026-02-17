@@ -8,10 +8,10 @@ pub struct OpencodeServerArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum OpencodeServerCommands {
-    /// Show managed OpenCode server status
+    /// Show managed OpenCode service status
     Status,
-    /// Ensure managed OpenCode server is running
+    /// Ensure managed OpenCode service is running
     Ensure,
-    /// Restart managed OpenCode server
+    /// Restart managed OpenCode service
     Restart,
 }

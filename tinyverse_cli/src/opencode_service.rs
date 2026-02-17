@@ -7,7 +7,7 @@ use tinyverse_lib::{
     ListSessionsOptions, SessionStore, SpawnSessionOptions, TmuxClient, UpsertAgentServiceInput,
 };
 
-use crate::commands::config::store::TinyverseConfig;
+use crate::commands::config::store::{OpencodeServerMode, TinyverseConfig};
 
 const OPENCODE_PROVIDER_KEY: &str = "opencode";
 const SERVER_CONNECT_TIMEOUT: Duration = Duration::from_millis(600);
@@ -22,6 +22,7 @@ pub struct ManagedOpencodeService {
     pub hostname: String,
     pub port: u16,
     pub base_url: String,
+    pub mode: OpencodeServerMode,
 }
 
 pub fn ensure_managed_opencode_service(
@@ -46,7 +47,7 @@ pub fn ensure_managed_opencode_service(
         && probe_server(&spec.connect_host, spec.port)
     {
         debug!("managed opencode service already healthy; reusing saved record");
-        return Ok(Some(map_saved(saved)));
+        return Ok(Some(map_saved(saved, spec.mode)));
     }
 
     let tmux_client = TmuxClient::new();
@@ -60,8 +61,10 @@ pub fn ensure_managed_opencode_service(
     let _ = tmux_client.kill_session(spec.tmux_session_name.clone().into());
 
     let command = format!(
-        "opencode serve --hostname {} --port {}",
-        spec.bind_hostname, spec.port
+        "opencode {} --hostname {} --port {}",
+        spec.mode.as_cli_subcommand(),
+        spec.bind_hostname,
+        spec.port
     );
     let mut options = SpawnSessionOptions::new(&spec.tmux_session_name);
     options.agent_command = Some(command);
@@ -82,7 +85,10 @@ pub fn ensure_managed_opencode_service(
             spec.connect_host, spec.port
         )
     })?;
-    info!("managed opencode server became reachable at {}", spec.base_url);
+    info!(
+        "managed opencode server became reachable at {}",
+        spec.base_url
+    );
 
     let stored = store.upsert_agent_service(&UpsertAgentServiceInput {
         provider_key: OPENCODE_PROVIDER_KEY.to_owned(),
@@ -93,7 +99,7 @@ pub fn ensure_managed_opencode_service(
         base_url: spec.base_url,
     })?;
 
-    Ok(Some(map_saved(&stored)))
+    Ok(Some(map_saved(&stored, spec.mode)))
 }
 
 pub fn restart_managed_opencode_service(
@@ -115,10 +121,11 @@ pub fn restart_managed_opencode_service(
 
 pub fn lookup_managed_opencode_service(
     store: &mut SessionStore,
+    mode: OpencodeServerMode,
 ) -> Result<Option<ManagedOpencodeService>> {
     Ok(store
         .find_agent_service(OPENCODE_PROVIDER_KEY)?
-        .map(|saved| map_saved(&saved)))
+        .map(|saved| map_saved(&saved, mode)))
 }
 
 pub fn service_is_reachable(service: &ManagedOpencodeService) -> bool {
@@ -132,10 +139,15 @@ pub fn tmux_session_is_live(session_name: &str) -> bool {
         return false;
     };
 
-    sessions.iter().any(|item| item.session_name == session_name)
+    sessions
+        .iter()
+        .any(|item| item.session_name == session_name)
 }
 
-fn map_saved(saved: &tinyverse_lib::StoredAgentService) -> ManagedOpencodeService {
+fn map_saved(
+    saved: &tinyverse_lib::StoredAgentService,
+    mode: OpencodeServerMode,
+) -> ManagedOpencodeService {
     ManagedOpencodeService {
         provider_key: saved.provider_key.clone(),
         tmux_session_name: saved.tmux_session_name.clone(),
@@ -143,11 +155,13 @@ fn map_saved(saved: &tinyverse_lib::StoredAgentService) -> ManagedOpencodeServic
         hostname: saved.hostname.clone(),
         port: saved.port.max(1) as u16,
         base_url: saved.base_url.clone(),
+        mode,
     }
 }
 
 #[derive(Debug, Clone)]
 struct ServiceSpec {
+    mode: OpencodeServerMode,
     bind_hostname: String,
     connect_host: String,
     port: u16,
@@ -160,6 +174,7 @@ fn service_spec_from_config(config: &TinyverseConfig) -> Option<ServiceSpec> {
         return None;
     }
 
+    let mode = config.opencode.server.mode;
     let bind_hostname = non_empty_or(config.opencode.server.hostname.trim(), "127.0.0.1");
     let port = config.opencode.server.port.max(1);
     let tmux_session_name = non_empty_or(
@@ -170,12 +185,22 @@ fn service_spec_from_config(config: &TinyverseConfig) -> Option<ServiceSpec> {
     let base_url = format!("http://{connect_host}:{port}");
 
     Some(ServiceSpec {
+        mode,
         bind_hostname,
         connect_host,
         port,
         tmux_session_name,
         base_url,
     })
+}
+
+impl OpencodeServerMode {
+    fn as_cli_subcommand(self) -> &'static str {
+        match self {
+            Self::Serve => "serve",
+            Self::Web => "web",
+        }
+    }
 }
 
 fn non_empty_or(value: &str, fallback: &str) -> String {

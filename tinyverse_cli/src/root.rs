@@ -41,7 +41,7 @@ pub enum Commands {
         #[command(subcommand)]
         command: PromptCommands,
     },
-    /// Manage the shared OpenCode server used by TinyVerse
+    /// Manage the shared OpenCode service (serve/web) used by TinyVerse
     #[command(name = "opencode-server")]
     OpencodeServer(OpencodeServerArgs),
     /// List known TinyVerse sessions

@@ -4,17 +4,17 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use tinyverse_lib::resolve_tinyverse_paths;
 use tinyverse_ui::{ActionLine, DefaultTheme, ErrorBlock, Panel, RenderContext, RenderMode, Tone};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
+use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::Layer;
 use tracing_subscriber::{EnvFilter, Registry};
 
 const RUST_INFO_ENV: &str = "RUST_INFO";

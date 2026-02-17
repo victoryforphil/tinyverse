@@ -1,14 +1,17 @@
 use anyhow::Result;
 use log::{debug, info, warn};
 use tinyverse_lib::SessionStore;
-use tinyverse_ui::{default_stdout_context, ActionLine, DetailSection, LabeledField, Panel, Tone};
+use tinyverse_ui::{ActionLine, DetailSection, LabeledField, Panel, Tone, default_stdout_context};
 
 use super::args::{OpencodeServerArgs, OpencodeServerCommands};
 use crate::commands::config::store;
+use crate::commands::config::store::OpencodeServerMode;
 use crate::opencode_service::{
     ensure_managed_opencode_service, lookup_managed_opencode_service,
     restart_managed_opencode_service, service_is_reachable, tmux_session_is_live,
 };
+
+const OPENCODE_WEB_DOCS_URL: &str = "https://opencode.ai/docs/web/";
 
 pub fn execute(args: OpencodeServerArgs) -> Result<()> {
     match args.command.unwrap_or(OpencodeServerCommands::Status) {
@@ -19,8 +22,10 @@ pub fn execute(args: OpencodeServerArgs) -> Result<()> {
 }
 
 fn status() -> Result<()> {
+    let config = store::load()?;
     let mut store = SessionStore::open_default()?;
-    let saved = lookup_managed_opencode_service(&mut store)?;
+    let mode = config.opencode.server.mode;
+    let saved = lookup_managed_opencode_service(&mut store, mode)?;
     let context = default_stdout_context();
 
     if let Some(saved) = saved {
@@ -33,9 +38,11 @@ fn status() -> Result<()> {
 
         let details = DetailSection::new("Managed Service")
             .with_field(LabeledField::new("Provider", saved.provider_key))
+            .with_field(LabeledField::new("Mode", mode_label(saved.mode)))
             .with_field(LabeledField::new("Base URL", saved.base_url))
             .with_field(LabeledField::new("Hostname", saved.hostname))
             .with_field(LabeledField::new("Port", saved.port.to_string()))
+            .with_field(LabeledField::new("Web docs", OPENCODE_WEB_DOCS_URL))
             .with_field(LabeledField::new("tmux Session", saved.tmux_session_name))
             .with_field(LabeledField::new(
                 "tmux Pane",
@@ -112,9 +119,11 @@ fn render_ensure_result(
     };
 
     let details = DetailSection::new("Managed Service")
+        .with_field(LabeledField::new("Mode", mode_label(service.mode)))
         .with_field(LabeledField::new("Base URL", service.base_url.clone()))
         .with_field(LabeledField::new("Hostname", service.hostname.clone()))
         .with_field(LabeledField::new("Port", service.port.to_string()))
+        .with_field(LabeledField::new("Web docs", OPENCODE_WEB_DOCS_URL))
         .with_field(LabeledField::new(
             "tmux Session",
             service.tmux_session_name.clone(),
@@ -133,4 +142,11 @@ fn render_ensure_result(
     .render(&context);
     println!("{panel}");
     Ok(())
+}
+
+fn mode_label(mode: OpencodeServerMode) -> &'static str {
+    match mode {
+        OpencodeServerMode::Serve => "serve",
+        OpencodeServerMode::Web => "web",
+    }
 }

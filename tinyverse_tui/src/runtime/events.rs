@@ -327,10 +327,8 @@ fn extract_opencode_base_url_from_command(command: &str) -> Option<String> {
         return Some(url);
     }
 
-    let hostname =
-        extract_arg_value_from_tokens(&tokens, "--hostname", "-h").unwrap_or_else(|| {
-            String::from("127.0.0.1")
-        });
+    let hostname = extract_arg_value_from_tokens(&tokens, "--hostname", "-h")
+        .unwrap_or_else(|| String::from("127.0.0.1"));
 
     let port = extract_arg_value_from_tokens(&tokens, "--port", "-p")
         .and_then(|value| value.trim().parse::<u16>().ok())
@@ -354,7 +352,11 @@ fn extract_attach_url_from_tokens(tokens: &[&str]) -> Option<String> {
     None
 }
 
-fn extract_arg_value_from_tokens(tokens: &[&str], long_flag: &str, short_flag: &str) -> Option<String> {
+fn extract_arg_value_from_tokens(
+    tokens: &[&str],
+    long_flag: &str,
+    short_flag: &str,
+) -> Option<String> {
     for (index, token) in tokens.iter().enumerate() {
         if let Some(value) = token.strip_prefix(&format!("{long_flag}="))
             && !value.trim().is_empty()
@@ -1460,13 +1462,17 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
             app.chat_bridge.set_base_url(&service.base_url);
         }
         let title = format!("tinyverse: {session_name}");
-        match app.chat_bridge.create_session_for_spawn(&mut app.chat, &title) {
+        match app
+            .chat_bridge
+            .create_session_for_spawn(&mut app.chat, &title)
+        {
             Ok(session_id) => {
                 attach_url = app.chat_bridge.opencode_base_url();
                 attach_session_id = Some(session_id);
             }
             Err(error) => {
-                app.status_message = format!("Spawn failed: unable to create chat session: {error}");
+                app.status_message =
+                    format!("Spawn failed: unable to create chat session: {error}");
                 return Ok(());
             }
         }

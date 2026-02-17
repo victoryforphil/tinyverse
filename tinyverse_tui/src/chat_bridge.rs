@@ -781,16 +781,17 @@ impl ChatBridge {
                         Ok(snapshot) => {
                             let previous_session = self.active_session_id.clone();
                             self.active_session_id = snapshot.active_session_id;
-                            self.known_sessions = if let Some(active_id) = self.active_session_id.as_deref() {
-                                snapshot
-                                    .sessions
-                                    .iter()
-                                    .filter(|session| session.id == active_id)
-                                    .cloned()
-                                    .collect()
-                            } else {
-                                snapshot.sessions.clone()
-                            };
+                            self.known_sessions =
+                                if let Some(active_id) = self.active_session_id.as_deref() {
+                                    snapshot
+                                        .sessions
+                                        .iter()
+                                        .filter(|session| session.id == active_id)
+                                        .cloned()
+                                        .collect()
+                                } else {
+                                    snapshot.sessions.clone()
+                                };
                             chat.set_models(snapshot.models);
                             chat.set_agents(snapshot.agents);
                             chat.set_messages(snapshot.messages);

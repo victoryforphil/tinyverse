@@ -6,10 +6,10 @@ use ratatui::layout::Rect;
 use ratatui::text::Line;
 use tinyverse_lib::{SessionStore, StoredSession};
 
+use crate::TuiRunOptions;
 use crate::chat::ChatState;
 use crate::chat_bridge::{ChatBridge, ChatSessionSummary};
 use crate::theme::UiTheme;
-use crate::TuiRunOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {

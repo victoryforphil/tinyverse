@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::{Args, ValueEnum};
 use serde::Serialize;
 use tinyverse_ui::{
-    default_stdout_context, ActionLine, LabeledField, Panel, StripeMode, StyledTable,
-    SummaryFooter, Tone,
+    ActionLine, LabeledField, Panel, StripeMode, StyledTable, SummaryFooter, Tone,
+    default_stdout_context,
 };
 
 use crate::commands::output::OutputFormat;
@@ -214,6 +214,13 @@ fn render_full_table_output(report: &ConfigPrintReport) -> String {
             report.config.opencode.server.enabled.to_string(),
         ])
         .with_row(vec![
+            "opencode.server.mode".to_owned(),
+            match report.config.opencode.server.mode {
+                store::OpencodeServerMode::Serve => "serve".to_owned(),
+                store::OpencodeServerMode::Web => "web".to_owned(),
+            },
+        ])
+        .with_row(vec![
             "opencode.server.hostname".to_owned(),
             report.config.opencode.server.hostname.clone(),
         ])
@@ -240,7 +247,7 @@ fn render_full_table_output(report: &ConfigPrintReport) -> String {
                 .with_tone(Tone::Info)
                 .render(&context),
             String::new(),
-            SummaryFooter::new("16 config key(s)").render(&context),
+            SummaryFooter::new("17 config key(s)").render(&context),
         ]
         .join("\n"),
     )
@@ -271,7 +278,7 @@ fn render_raw_output(config: &store::TinyverseConfig, format: OutputFormat) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{render_full_output, render_raw_output, ConfigPrintReport};
+    use super::{ConfigPrintReport, render_full_output, render_raw_output};
     use crate::commands::config::store::{
         GitConfig, OpencodeConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig,
         TuiConfig, WorkspaceConfig,
