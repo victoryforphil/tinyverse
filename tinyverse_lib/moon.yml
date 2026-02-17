@@ -25,7 +25,8 @@ tasks:
       - "/Cargo.lock"
 
   test:
-    command: "cargo test"
+    command: "bun"
+    args: ["./scripts/helpers/test_rust.sh.ts", "-p", "tinyverse_lib"]
     inputs:
       - "src/**/*"
       - "Cargo.toml"
