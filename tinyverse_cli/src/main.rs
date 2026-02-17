@@ -9,7 +9,7 @@ mod run;
 
 fn main() -> Result<()> {
     let cli = root::Cli::parse();
-    logging::init()?;
+    logging::init(cli.tinyverse_dir_home.as_deref())?;
 
     run::run(cli)
 }

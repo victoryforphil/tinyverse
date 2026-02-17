@@ -1,4 +1,4 @@
-use crate::render::{truncate_with_ellipsis, RenderContext, RenderMode};
+use crate::render::{RenderContext, RenderMode, truncate_with_ellipsis};
 
 /// Per-column text alignment mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

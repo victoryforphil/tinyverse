@@ -2,11 +2,10 @@ use clap::Args;
 
 #[derive(Debug, Args)]
 pub struct KillArgs {
-    /// Session id or name
-    #[arg(required_unless_present = "all")]
+    /// TinyVerse session key or name to terminate (interactive picker when omitted)
     pub session: Option<String>,
 
-    /// Kill all tinyverse sessions
+    /// Kill all TinyVerse sessions
     #[arg(long, short = 'a', default_value_t = false, conflicts_with = "session")]
     pub all: bool,
 }

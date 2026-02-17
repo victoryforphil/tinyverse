@@ -22,6 +22,7 @@ pub use self::models::SessionRecord as StoredSession;
 pub const STATUS_ACTIVE: &str = "active";
 pub const DEFAULT_RECONCILE_MIN_INTERVAL: Duration = Duration::from_secs(2);
 pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
+const TINYVERSE_SESSION_PREFIX: &str = "tinyverse_";
 
 #[derive(Debug, Clone)]
 pub struct CreateSessionInput {
@@ -104,7 +105,7 @@ impl SessionStore {
             return Ok(None);
         }
 
-        tinyverse_sessions::table
+        let exact_match = tinyverse_sessions::table
             .filter(
                 tinyverse_sessions::session_key
                     .eq(normalized)
@@ -114,7 +115,29 @@ impl SessionStore {
             .select(SessionRecord::as_select())
             .first::<SessionRecord>(&mut self.conn)
             .optional()
-            .with_context(|| format!("failed to find session `{normalized}`"))
+            .with_context(|| format!("failed to find session `{normalized}`"))?;
+
+        if exact_match.is_some() {
+            return Ok(exact_match);
+        }
+
+        let Some(prefixed_query) = with_tinyverse_prefix(normalized) else {
+            return Ok(None);
+        };
+
+        tinyverse_sessions::table
+            .filter(
+                tinyverse_sessions::session_key
+                    .eq(&prefixed_query)
+                    .or(tinyverse_sessions::session_name.eq(&prefixed_query))
+                    .or(tinyverse_sessions::tmux_session_name.eq(&prefixed_query)),
+            )
+            .select(SessionRecord::as_select())
+            .first::<SessionRecord>(&mut self.conn)
+            .optional()
+            .with_context(|| {
+                format!("failed to find session `{normalized}` via `{prefixed_query}`")
+            })
     }
 
     pub fn create_session(&mut self, input: &CreateSessionInput) -> Result<SessionRecord> {
@@ -307,6 +330,14 @@ fn should_run_reconcile(last_run_at: Option<Instant>, min_interval: Duration, fo
     last_run_at.elapsed() >= min_interval
 }
 
+fn with_tinyverse_prefix(value: &str) -> Option<String> {
+    if value.starts_with(TINYVERSE_SESSION_PREFIX) {
+        return None;
+    }
+
+    Some(format!("{TINYVERSE_SESSION_PREFIX}{value}"))
+}
+
 pub fn sanitize_session_key(value: &str) -> String {
     let lowered = value.trim().to_ascii_lowercase();
     if lowered.is_empty() {
@@ -341,7 +372,7 @@ pub fn sanitize_session_key(value: &str) -> String {
 mod tests {
     use std::time::Duration;
 
-    use super::{sanitize_session_key, should_run_reconcile};
+    use super::{sanitize_session_key, should_run_reconcile, with_tinyverse_prefix};
 
     #[test]
     fn sanitize_session_key_normalizes_and_collapses_symbols() {
@@ -368,5 +399,18 @@ mod tests {
         let now = std::time::Instant::now();
         let should_run = should_run_reconcile(Some(now), Duration::from_secs(10), true);
         assert!(should_run);
+    }
+
+    #[test]
+    fn adds_tinyverse_prefix_for_unprefixed_queries() {
+        assert_eq!(
+            with_tinyverse_prefix("redding"),
+            Some("tinyverse_redding".to_owned())
+        );
+    }
+
+    #[test]
+    fn skips_prefix_for_already_prefixed_queries() {
+        assert_eq!(with_tinyverse_prefix("tinyverse_redding"), None);
     }
 }

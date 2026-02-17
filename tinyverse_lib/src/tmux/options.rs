@@ -6,6 +6,7 @@ use super::types::{PaneTarget, SessionTarget};
 pub struct SpawnSessionOptions {
     pub session_name: String,
     pub working_dir: Option<PathBuf>,
+    pub pane_shell_command: Option<String>,
     pub console_command: Option<String>,
     pub agent_command: Option<String>,
 }
@@ -15,6 +16,7 @@ impl SpawnSessionOptions {
         Self {
             session_name: session_name.into(),
             working_dir: None,
+            pane_shell_command: None,
             console_command: None,
             agent_command: None,
         }

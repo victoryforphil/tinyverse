@@ -1,5 +1,5 @@
 use super::args::ListArgs;
-use crate::commands::output::{OutputFormat, render_output};
+use crate::commands::output::{display_session_name, render_output};
 use anyhow::{Context, Result};
 use serde::Serialize;
 use tinyverse_lib::tmux::{ListSessionsOptions, TmuxClient};
@@ -8,6 +8,10 @@ use tinyverse_ui::{
     ActionLine, GuidanceLine, Panel, StripeMode, StyledTable, SummaryFooter, Tone,
     default_stdout_context,
 };
+
+const EMPTY_MESSAGE: &str = "No TinyVerse sessions found in database.";
+const SPAWN_GUIDANCE: &str = "Run `tinyverse spawn <name>` to create one.";
+const UNMANAGED_GUIDANCE: &str = "Use --all to include unmanaged tmux sessions.";
 
 #[derive(Debug, Serialize)]
 struct ListReport {
@@ -64,16 +68,12 @@ pub fn execute(args: ListArgs) -> Result<()> {
         sessions: report_rows,
     };
 
-    let output = if args.format == OutputFormat::Table {
-        format_table_report(&report)
-    } else {
-        render_output(
-            &report,
-            args.format,
-            format_table_report,
-            format_text_report,
-        )?
-    };
+    let output = render_output(
+        &report,
+        args.format,
+        format_table_report,
+        format_text_report,
+    )?;
     println!("{output}");
 
     Ok(())
@@ -81,7 +81,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
 
 fn format_text_report(report: &ListReport) -> String {
     if report.sessions.is_empty() {
-        return "No tinyverse sessions found in database.".to_owned();
+        return EMPTY_MESSAGE.to_owned();
     }
 
     let mut lines = Vec::new();
@@ -109,17 +109,14 @@ fn format_text_report(report: &ListReport) -> String {
 fn format_table_report(report: &ListReport) -> String {
     let context = default_stdout_context();
     let mut table_panel_lines = Vec::new();
+    let mut outer_footer_lines = vec![
+        SummaryFooter::new(format!("{} session(s)", report.returned_sessions)).render(&context),
+    ];
 
     if report.sessions.is_empty() {
-        table_panel_lines.push("No tinyverse sessions found in database.".to_owned());
-        table_panel_lines.push(
-            GuidanceLine::new("Run `tinyverse spawn <name>` to create one.").render(&context),
-        );
-        if !report.showing_all {
-            table_panel_lines.push(
-                GuidanceLine::new("Use --all to include unmanaged tmux sessions.").render(&context),
-            );
-        }
+        table_panel_lines.push(EMPTY_MESSAGE.to_owned());
+        outer_footer_lines.push(GuidanceLine::new(SPAWN_GUIDANCE).render(&context));
+        append_unmanaged_guidance(&mut outer_footer_lines, report.showing_all, &context);
     } else {
         let mut table = StyledTable::new(vec![
             "KEY", "NAME", "STATUS", "ATTACHED", "WINDOWS", "SOURCE",
@@ -130,7 +127,7 @@ fn format_table_report(report: &ListReport) -> String {
         for session in &report.sessions {
             table = table.with_row(vec![
                 session.session_key.as_deref().unwrap_or("-").to_owned(),
-                session.name.clone(),
+                display_session_name(&session.name),
                 session.status.as_deref().unwrap_or("-").to_owned(),
                 session.attached_clients.to_string(),
                 session.windows.to_string(),
@@ -139,16 +136,8 @@ fn format_table_report(report: &ListReport) -> String {
         }
 
         table_panel_lines.push(table.render(&context));
-        table_panel_lines.push(String::new());
-        table_panel_lines.push(
-            SummaryFooter::new(format!("{} session(s)", report.returned_sessions)).render(&context),
-        );
 
-        if !report.showing_all {
-            table_panel_lines.push(
-                GuidanceLine::new("Use --all to include unmanaged tmux sessions.").render(&context),
-            );
-        }
+        append_unmanaged_guidance(&mut outer_footer_lines, report.showing_all, &context);
     }
 
     let table_panel = Panel::new(table_panel_lines.join("\n"))
@@ -165,19 +154,24 @@ fn format_table_report(report: &ListReport) -> String {
         .render(&context),
         String::new(),
         table_panel,
+        String::new(),
     ];
-
-    if let Some(width) = context.width {
-        let content_width = width.saturating_sub(4);
-        if content_width > 0 {
-            outer_lines.push(" ".repeat(content_width));
-        }
-    }
+    outer_lines.extend(outer_footer_lines);
 
     Panel::new(outer_lines.join("\n"))
-        .with_title("tinyverse list")
+        .with_title("TinyVerse: List")
         .with_tone(Tone::Info)
         .render(&context)
+}
+
+fn append_unmanaged_guidance(
+    lines: &mut Vec<String>,
+    showing_all: bool,
+    context: &tinyverse_ui::RenderContext<'_>,
+) {
+    if !showing_all {
+        lines.push(GuidanceLine::new(UNMANAGED_GUIDANCE).render(context));
+    }
 }
 
 fn append_unmanaged_tmux_sessions(
@@ -218,7 +212,7 @@ mod tests {
         };
 
         let rendered = format_text_report(&report);
-        assert!(rendered.contains("No tinyverse sessions found in database"));
+        assert!(rendered.contains("No TinyVerse sessions found in database"));
     }
 
     #[test]
@@ -259,11 +253,11 @@ mod tests {
         };
 
         let rendered = format_table_report(&report);
-        assert!(rendered.contains("tinyverse list"));
+        assert!(rendered.contains("TinyVerse: List"));
         assert!(rendered.contains("Session Table"));
         assert!(rendered.contains("INFO"));
         assert!(rendered.contains("KEY"));
-        assert!(rendered.contains("tinyverse_1"));
+        assert!(rendered.contains("1 do TinyVerse // 1"));
         assert!(rendered.contains("Summary:"));
         assert!(!rendered.contains("Use --all to include unmanaged tmux sessions."));
     }
@@ -278,10 +272,10 @@ mod tests {
         };
 
         let rendered = format_table_report(&report);
-        assert!(rendered.contains("tinyverse list"));
+        assert!(rendered.contains("TinyVerse: List"));
         assert!(rendered.contains("Session Table"));
         assert!(rendered.contains("INFO"));
-        assert!(rendered.contains("No tinyverse sessions found in database."));
+        assert!(rendered.contains("No TinyVerse sessions found in database."));
         assert!(rendered.contains("Run `tinyverse spawn <name>` to create one."));
         assert!(rendered.contains("Use --all to include unmanaged tmux sessions."));
     }

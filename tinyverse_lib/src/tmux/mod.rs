@@ -55,9 +55,13 @@ impl TmuxClient {
             new_session_args.push(working_dir.display().to_string());
         }
 
-        let console_pane_id = self.run_tmux(new_session_args)?;
+        if let Some(shell_command) = options.pane_shell_command.as_ref() {
+            new_session_args.push(shell_command.clone());
+        }
 
-        if console_pane_id.is_empty() {
+        let agent_pane_id = self.run_tmux(new_session_args)?;
+
+        if agent_pane_id.is_empty() {
             return Err(TmuxError::ParseOutput {
                 command: "new-session",
                 details: "missing pane id in command output".to_owned(),
@@ -72,7 +76,7 @@ impl TmuxClient {
             "-F".to_owned(),
             "#{pane_id}".to_owned(),
             "-t".to_owned(),
-            console_pane_id.clone(),
+            agent_pane_id.clone(),
         ];
 
         if let Some(working_dir) = options.working_dir.as_ref() {
@@ -80,9 +84,13 @@ impl TmuxClient {
             split_args.push(working_dir.display().to_string());
         }
 
-        let agent_pane_id = self.run_tmux(split_args)?;
+        if let Some(shell_command) = options.pane_shell_command.as_ref() {
+            split_args.push(shell_command.clone());
+        }
 
-        if agent_pane_id.is_empty() {
+        let console_pane_id = self.run_tmux(split_args)?;
+
+        if console_pane_id.is_empty() {
             return Err(TmuxError::ParseOutput {
                 command: "split-window",
                 details: "missing pane id in command output".to_owned(),
@@ -93,17 +101,17 @@ impl TmuxClient {
         self.run_tmux(vec![
             "select-pane".to_owned(),
             "-t".to_owned(),
-            console_pane_id.clone(),
+            agent_pane_id.clone(),
             "-T".to_owned(),
-            PanelRole::Console.as_title().to_owned(),
+            PanelRole::Agent.as_title().to_owned(),
         ])?;
 
         self.run_tmux(vec![
             "select-pane".to_owned(),
             "-t".to_owned(),
-            agent_pane_id.clone(),
+            console_pane_id.clone(),
             "-T".to_owned(),
-            PanelRole::Agent.as_title().to_owned(),
+            PanelRole::Console.as_title().to_owned(),
         ])?;
 
         if let Some(command) = options.console_command.as_deref() {

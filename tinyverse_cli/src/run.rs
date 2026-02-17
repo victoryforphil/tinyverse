@@ -23,6 +23,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Commands::List(args) => commands::list::command::execute(args),
         Commands::Spawn(args) => commands::spawn::command::execute(args),
         Commands::Attach(args) => commands::attach::command::execute(args),
+        Commands::Detach(args) => commands::detach::command::execute(args),
         Commands::Kill(args) => commands::kill::command::execute(args),
         Commands::View(args) => commands::view::command::execute(args),
         Commands::Send(args) => commands::send::command::execute(args),

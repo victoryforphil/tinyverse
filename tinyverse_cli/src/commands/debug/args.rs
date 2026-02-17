@@ -15,6 +15,6 @@ pub enum DebugCommands {
 #[derive(Debug, Args)]
 pub struct DebugSelfArgs {
     /// Output format
-    #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+    #[arg(long, value_enum, default_value_t = OutputFormat::Table)]
     pub format: OutputFormat,
 }

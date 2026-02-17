@@ -1,6 +1,7 @@
 pub mod attach;
 pub mod config;
 pub mod debug;
+pub mod detach;
 pub mod kill;
 pub mod list;
 pub mod output;
@@ -8,5 +9,4 @@ pub mod path;
 pub mod providers;
 pub mod send;
 pub mod spawn;
-pub mod tmux_helpers;
 pub mod view;

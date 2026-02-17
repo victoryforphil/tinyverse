@@ -5,8 +5,8 @@ use tinyverse_lib::TINYVERSE_DIR_HOME_ENV;
 
 use crate::commands::{
     attach::args::AttachArgs, config::command::ConfigCommands, debug::args::DebugCommands,
-    kill::args::KillArgs, list::args::ListArgs, send::args::SendArgs, spawn::args::SpawnArgs,
-    view::args::ViewArgs,
+    detach::args::DetachArgs, kill::args::KillArgs, list::args::ListArgs, send::args::SendArgs,
+    spawn::args::SpawnArgs, view::args::ViewArgs,
 };
 
 #[derive(Debug, Parser)]
@@ -36,13 +36,15 @@ pub enum Commands {
     },
     /// Show tinyverse data directory
     Path,
-    /// List known tinyverse sessions
+    /// List known TinyVerse sessions
     List(ListArgs),
-    /// Spawn a new tinyverse session
+    /// Spawn a new TinyVerse session
     Spawn(SpawnArgs),
-    /// Attach to a tinyverse session by id or name
+    /// Attach to a TinyVerse session by key or name
     Attach(AttachArgs),
-    /// Kill a tinyverse session by id/name, or all with --all
+    /// Detach current tmux client without closing session
+    Detach(DetachArgs),
+    /// Kill a TinyVerse session by key/name, or all with --all
     Kill(KillArgs),
     /// View panel text buffer
     View(ViewArgs),

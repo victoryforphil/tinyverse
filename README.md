@@ -40,10 +40,26 @@
   4. cwd-local `.tinyverse` if present
   5. `~/.tinyverse`
 
+### Config files
+
+- Active config file: `<tinyverse_home>/config.toml`
+- Legacy fallback file (read-only fallback): `<tinyverse_home>/tinyverse.toml`
+- When active home is not `~/.tinyverse`, config loading merges in this order:
+  1. `~/.tinyverse/config.toml` (or legacy `~/.tinyverse/tinyverse.toml`)
+  2. active home config (`<tinyverse_home>/config.toml`, legacy fallback if needed)
+- `tinyverse config export` writes the effective config to disk (defaults to `active_path`) and prints metadata comments (`selected_source`, `active_path`, `written_to`, `loaded_from`) so you can verify exactly which file(s) were used.
+
 ## Testing
 
 - Preferred Rust test runner: `cargo nextest run`
 - Fallback when `cargo-nextest` is unavailable or fails in this environment: `cargo test`
+
+## Logging
+
+- Tracing logs write to both stdout and a file.
+- Log files are created under `<tinyverse_home>/logs/`.
+- File name format: `tinyverse-<unix_millis>.log`.
+- `tinyverse_home` follows the same resolution order documented in `CLI / Commands`.
 
 ## Moon
 
@@ -62,14 +78,38 @@
   - `--all` includes unmanaged tmux sessions in addition to DB sessions.
   - `--format={table|text|json}` (default: `table`)
 - `spawn` // Create a new tinyverse session (console + agent panes).
-  - `--agent={opencode}`
+  - Pane layout: `agent` on left, `console` on right.
+  - `--agent={opencode}` (defaults from `spawn.default_agent` config)
   - `--prompt={file_or_string}`
+  - `--model={model}` (defaults from `spawn.default_model` config when set)
   - `--agent_args={string}` (supports `{prompt}` placeholder)
+  - `--clean-shell` (starts panes with `zsh -f`, ignores user `~/.zshrc`)
+  - `--no-clean-shell` (forces default shell startup behavior)
+  - Working directory defaults to `workspace.default_dir` when configured, otherwise current directory.
+- `config print` // Human-readable config view.
+- `config export` // Export effective config as TOML (with source/path metadata comments).
+  - Writes to resolved `active_path` by default.
+  - `--path <config_file>` writes to that explicit output file path.
+- `config set <key> <value>` // Persist a config value in `<tinyverse_home>/config.toml`.
+  - Supported keys:
+    - `shell.clean` (`true|false`)
+    - `workspace.default_dir` (path string; use `none` to clear)
+    - `git.branch_prefix` (string)
+    - `spawn.default_agent` (string)
+    - `spawn.default_model` (string; use `none` to clear)
 - `attach <session>` // Attach to an existing session by key or name.
+  - Session lookup first tries an exact match.
+  - If exact match is not found, tinyverse also tries `tinyverse_<session>`.
+    - Example: `attach redding` resolves `tinyverse_redding` when present.
+  - If `<session>` is omitted in an interactive terminal, tinyverse opens a TUI selector.
+- `detach` // Detach current tmux client without closing the session.
 - `kill <session>` // Kill session by key or name.
+  - If `<session>` is omitted in an interactive terminal, tinyverse opens a TUI selector.
 - `view` // Capture pane output.
   - `--session={key_or_name}` (optional inside tmux, required outside tmux)
   - `--panel={console|agent|%pane_id}`
+  - `--output={full|raw}` (default: `full`; `raw` prints pane buffer text only)
+  - `--export=<path>` (writes rendered output to file; adds `.md` when extension is missing)
 - `send <command>` // Send keys to pane.
   - `--session={key_or_name}` (optional inside tmux, required outside tmux)
   - `--panel={console|agent|%pane_id}`
@@ -86,6 +126,24 @@ cargo run -p tinyverse_cli -- spawn
 
 # Spawn with a prompt string
 cargo run -p tinyverse_cli -- spawn --prompt "you are a helpful coding agent"
+
+# Spawn with clean zsh (no ~/.zshrc)
+cargo run -p tinyverse_cli -- spawn --clean-shell
+
+# Persist clean shell as the default for future spawns
+cargo run -p tinyverse_cli -- config set shell.clean true
+
+# Set default spawn and workspace values
+cargo run -p tinyverse_cli -- config set spawn.default_agent opencode
+cargo run -p tinyverse_cli -- config set spawn.default_model gpt-5.3-codex
+cargo run -p tinyverse_cli -- config set workspace.default_dir ~/repos/vfp/tinyverse
+
+# Check effective config and export as TOML
+cargo run -p tinyverse_cli -- config print
+cargo run -p tinyverse_cli -- config export
+
+# Export a specific config file
+cargo run -p tinyverse_cli -- config export --path ./.tinyverse/config.toml
 
 # Spawn with an explicit key/name
 cargo run -p tinyverse_cli -- spawn --key my-session
@@ -105,11 +163,26 @@ cargo run -p tinyverse_cli -- list --format json
 # Attach to a session
 cargo run -p tinyverse_cli -- attach tinyverse_123
 
+# Attach and choose from interactive TUI selector
+cargo run -p tinyverse_cli -- attach
+
+# Attach using implicit tinyverse_ prefix fallback
+cargo run -p tinyverse_cli -- attach redding
+
+# Detach from current tmux client (session keeps running)
+cargo run -p tinyverse_cli -- detach
+
 # Send a command to a specific session console pane
 cargo run -p tinyverse_cli -- send "pwd" --session tinyverse_123 --panel console
 
 # View latest console output for a session
 cargo run -p tinyverse_cli -- view --session tinyverse_123 --panel console
+
+# View raw pane buffer only (agent-friendly)
+cargo run -p tinyverse_cli -- view --session tinyverse_123 --panel console --output raw
+
+# Export captured output to markdown
+cargo run -p tinyverse_cli -- view --session tinyverse_123 --panel console --export ./captures/redding
 
 # Debug current context as text/json
 cargo run -p tinyverse_cli -- debug self
@@ -120,4 +193,7 @@ cargo run -p tinyverse_cli -- debug reset-db
 
 # Kill a session
 cargo run -p tinyverse_cli -- kill tinyverse_123
+
+# Kill and choose from interactive TUI selector
+cargo run -p tinyverse_cli -- kill
 ```

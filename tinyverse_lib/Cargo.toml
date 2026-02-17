@@ -3,13 +3,20 @@ name = "tinyverse_lib"
 version = "0.1.0"
 edition = "2024"
 
+[build-dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+toml = "1.0.2"
+
 [dependencies]
 anyhow = { version = "1.0.101", features = ["backtrace"] }
 chrono = { version = "0.4.42", features = ["serde"] }
 clap = { version = "4.5.59", features = ["derive", "env"] }
+crossterm = "0.28.1"
 diesel = { version = "2.3.6", features = ["sqlite", "returning_clauses_for_sqlite_3_35", "chrono"] }
 diesel_migrations = "2.3.0"
 log = "0.4.29"
+nu-ansi-term = "0.50.3"
 pretty_env_logger = "0.5.0"
 serde = { version = "1.0.228", features = ["derive"] }
+tinyverse_ui = { path = "../tinyverse_ui" }
 toml = "1.0.2"

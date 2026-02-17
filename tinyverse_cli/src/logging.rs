@@ -1,6 +1,11 @@
-use std::io::IsTerminal;
+use std::fs::OpenOptions;
+use std::io::{IsTerminal, Write};
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow};
+use tinyverse_lib::resolve_tinyverse_paths;
 use tinyverse_ui::{ActionLine, DefaultTheme, ErrorBlock, Panel, RenderContext, RenderMode, Tone};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
@@ -14,6 +19,7 @@ use tracing_subscriber::{EnvFilter, Registry};
 const RUST_INFO_ENV: &str = "RUST_INFO";
 const NO_COLOR_ENV: &str = "NO_COLOR";
 const DEFAULT_LOG_LEVEL: &str = "INFO";
+const LOGS_DIR_NAME: &str = "logs";
 
 pub struct FancyFormat {
     use_ansi: bool,
@@ -119,12 +125,26 @@ where
     }
 }
 
-pub fn init() -> Result<()> {
+pub fn init(tinyverse_dir_home_override: Option<&Path>) -> Result<()> {
     let filter_value =
         std::env::var(RUST_INFO_ENV).unwrap_or_else(|_| DEFAULT_LOG_LEVEL.to_owned());
     let env_filter = EnvFilter::try_new(filter_value)
         .or_else(|_| EnvFilter::try_new(DEFAULT_LOG_LEVEL))
         .context("failed to build env filter")?;
+
+    let tinyverse_paths = resolve_tinyverse_paths(tinyverse_dir_home_override)
+        .context("failed to resolve tinyverse paths for log file")?;
+    let logs_dir = tinyverse_paths.home_dir.join(LOGS_DIR_NAME);
+    std::fs::create_dir_all(&logs_dir)
+        .with_context(|| format!("failed to create log directory `{}`", logs_dir.display()))?;
+
+    let log_file_path = logs_dir.join(format!("tinyverse-{}.log", unix_timestamp_millis()));
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file_path)
+        .with_context(|| format!("failed to open log file `{}`", log_file_path.display()))?;
+    let log_file = Arc::new(Mutex::new(log_file));
 
     let use_ansi = std::io::stdout().is_terminal() && std::env::var_os(NO_COLOR_ENV).is_none();
     let fmt_layer = tracing_subscriber::fmt::layer()
@@ -132,14 +152,58 @@ pub fn init() -> Result<()> {
         .with_target(false)
         .with_ansi(use_ansi)
         .event_format(FancyFormat::new(use_ansi));
+    let file_layer = tracing_subscriber::fmt::layer()
+        .without_time()
+        .with_target(false)
+        .with_ansi(false)
+        .event_format(FancyFormat::new(false))
+        .with_writer({
+            let log_file = Arc::clone(&log_file);
+            move || SharedFileWriter::new(Arc::clone(&log_file))
+        });
 
     Registry::default()
         .with(env_filter)
         .with(fmt_layer)
+        .with(file_layer)
         .try_init()
         .map_err(|error| anyhow!("failed to initialize tracing subscriber: {error}"))?;
 
     Ok(())
+}
+
+fn unix_timestamp_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis())
+}
+
+struct SharedFileWriter {
+    file: Arc<Mutex<std::fs::File>>,
+}
+
+impl SharedFileWriter {
+    fn new(file: Arc<Mutex<std::fs::File>>) -> Self {
+        Self { file }
+    }
+}
+
+impl Write for SharedFileWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let mut file = self
+            .file
+            .lock()
+            .map_err(|_| std::io::Error::other("log file writer lock poisoned"))?;
+        file.write(buf)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        let mut file = self
+            .file
+            .lock()
+            .map_err(|_| std::io::Error::other("log file writer lock poisoned"))?;
+        file.flush()
+    }
 }
 
 fn level_label(level: &Level) -> &'static str {

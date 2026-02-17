@@ -2,6 +2,12 @@ use anyhow::Result;
 use clap::ValueEnum;
 use serde::Serialize;
 
+/// Re-export the canonical display-name formatter from `tinyverse_ui`.
+///
+/// Converts machine names like `tinyverse_redding` to polished
+/// user-facing names like `Redding do TinyVerse // Redding`.
+pub use tinyverse_ui::format_display_name as display_session_name;
+
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Eq)]
 pub enum OutputFormat {
     Table,
@@ -33,11 +39,19 @@ where
 mod tests {
     use serde::Serialize;
 
-    use super::{OutputFormat, render_output};
+    use super::{OutputFormat, display_session_name, render_output};
 
     #[derive(Serialize)]
     struct Example {
         label: &'static str,
+    }
+
+    #[test]
+    fn display_name_reexport_works() {
+        assert_eq!(
+            display_session_name("tinyverse_redding"),
+            "Redding do TinyVerse // Redding"
+        );
     }
 
     #[test]

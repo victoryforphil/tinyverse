@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use crate::render::{truncate_with_ellipsis, visible_width, RenderContext, RenderMode};
+use crate::render::{RenderContext, RenderMode, truncate_with_ellipsis, visible_width};
 use crate::theme::Tone;
 
 pub struct Panel<'a> {

@@ -1,8 +1,9 @@
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use tinyverse_lib::SessionStore;
-use tinyverse_lib::tmux::{PaneTarget, SessionTarget};
+
+use crate::SessionStore;
+use crate::tmux::{PaneTarget, SessionTarget};
 
 const LIST_PANES_FORMAT: &str = "#{pane_id}\t#{pane_index}\t#{pane_title}\t#{?pane_active,1,0}";
 

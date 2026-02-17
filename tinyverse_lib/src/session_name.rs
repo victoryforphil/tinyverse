@@ -2,7 +2,8 @@ use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Result, bail};
-use tinyverse_lib::SessionStore;
+
+use crate::session_store::SessionStore;
 
 pub fn resolve_session_name(user_key: Option<&str>, store: &mut SessionStore) -> Result<String> {
     match user_key.and_then(normalize) {
@@ -26,8 +27,9 @@ fn default_session_name(store: &mut SessionStore) -> Result<String> {
         used_keys.insert(session.session_key);
     }
 
-    let start_index = random_start_index(CALIFORNIA_CITIES.len());
-    let maybe_city = select_available_city(start_index, &used_keys);
+    let cities = default_session_cities();
+    let start_index = random_start_index(cities.len());
+    let maybe_city = select_available_city(cities, start_index, &used_keys);
     match maybe_city {
         Some(city) => Ok(format!("tinyverse_{city}")),
         None => bail!(
@@ -48,52 +50,33 @@ fn random_start_index(len: usize) -> usize {
     (nanos % len as u128) as usize
 }
 
-fn select_available_city(start_index: usize, used_keys: &HashSet<String>) -> Option<&'static str> {
-    for offset in 0..CALIFORNIA_CITIES.len() {
-        let index = (start_index + offset) % CALIFORNIA_CITIES.len();
-        let candidate = format!("tinyverse_{}", CALIFORNIA_CITIES[index]);
+fn select_available_city<'a>(
+    cities: &'a [&'a str],
+    start_index: usize,
+    used_keys: &HashSet<String>,
+) -> Option<&'a str> {
+    for offset in 0..cities.len() {
+        let index = (start_index + offset) % cities.len();
+        let candidate = format!("tinyverse_{}", cities[index]);
         if !used_keys.contains(&candidate) {
-            return Some(CALIFORNIA_CITIES[index]);
+            return Some(cities[index]);
         }
     }
 
     None
 }
 
-const CALIFORNIA_CITIES: [&str; 26] = [
-    "anaheim",
-    "bakersfield",
-    "berkeley",
-    "burbank",
-    "carlsbad",
-    "cupertino",
-    "fresno",
-    "glendale",
-    "irvine",
-    "longbeach",
-    "losangeles",
-    "malibu",
-    "modesto",
-    "monterey",
-    "oakland",
-    "pasadena",
-    "redding",
-    "sacramento",
-    "san_bernardino",
-    "sandiego",
-    "sanfrancisco",
-    "sanjose",
-    "santabarbara",
-    "santacruz",
-    "santamonica",
-    "stockton",
-];
+fn default_session_cities() -> &'static [&'static str] {
+    DEFAULT_SESSION_CITIES
+}
+
+include!(concat!(env!("OUT_DIR"), "/california_cities.rs"));
 
 #[cfg(test)]
 mod tests {
     use std::collections::HashSet;
 
-    use super::{CALIFORNIA_CITIES, normalize, select_available_city};
+    use super::{default_session_cities, normalize, random_start_index, select_available_city};
 
     #[test]
     fn normalize_keeps_user_provided_key_when_present() {
@@ -110,17 +93,40 @@ mod tests {
     #[test]
     fn selects_first_available_city_from_start_index() {
         let used = HashSet::from([String::from("tinyverse_anaheim")]);
-        let city = select_available_city(0, &used).expect("a city should be available");
+        let cities = ["anaheim", "bakersfield"];
+        let city = select_available_city(&cities, 0, &used).expect("a city should be available");
         assert_eq!(city, "bakersfield");
     }
 
     #[test]
     fn returns_none_when_all_city_keys_are_taken() {
-        let used: HashSet<String> = CALIFORNIA_CITIES
-            .iter()
+        let cities = ["anaheim", "bakersfield"];
+        let used: HashSet<String> = cities
+            .into_iter()
             .map(|city| format!("tinyverse_{city}"))
             .collect();
-        let city = select_available_city(0, &used);
+        let city = select_available_city(&cities, 0, &used);
         assert!(city.is_none());
+    }
+
+    #[test]
+    fn wraps_around_to_find_available_city() {
+        let cities = ["anaheim", "bakersfield", "berkeley"];
+        let used = HashSet::from([
+            String::from("tinyverse_berkeley"),
+            String::from("tinyverse_anaheim"),
+        ]);
+        let city = select_available_city(&cities, 2, &used).expect("a city should be available");
+        assert_eq!(city, "bakersfield");
+    }
+
+    #[test]
+    fn default_city_list_is_not_empty() {
+        assert!(!default_session_cities().is_empty());
+    }
+
+    #[test]
+    fn random_start_index_is_zero_for_empty_lists() {
+        assert_eq!(random_start_index(0), 0);
     }
 }

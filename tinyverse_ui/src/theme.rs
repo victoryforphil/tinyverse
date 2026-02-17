@@ -8,6 +8,7 @@ pub enum Tone {
     Success,
     Warning,
     Error,
+    Muted,
 }
 
 /// Maps semantic presentation roles to concrete ANSI styles.
@@ -69,6 +70,7 @@ impl Theme for DefaultTheme {
             Tone::Success => Style::new().fg(Color::Green).bold(),
             Tone::Warning => Style::new().fg(Color::Yellow).bold(),
             Tone::Error => Style::new().fg(Color::Red).bold(),
+            Tone::Muted => Style::new().dimmed(),
         }
     }
 
@@ -79,6 +81,7 @@ impl Theme for DefaultTheme {
             Tone::Success => Style::new().on(Color::Green).fg(Color::Black).bold(),
             Tone::Warning => Style::new().on(Color::Yellow).fg(Color::Black).bold(),
             Tone::Error => Style::new().on(Color::Red).fg(Color::White).bold(),
+            Tone::Muted => Style::new().dimmed(),
         }
     }
 
@@ -89,6 +92,7 @@ impl Theme for DefaultTheme {
             Tone::Success => Style::new().fg(Color::Green),
             Tone::Warning => Style::new().fg(Color::Yellow),
             Tone::Error => Style::new().fg(Color::Red).bold(),
+            Tone::Muted => Style::new().dimmed(),
         }
     }
 }
