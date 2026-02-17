@@ -2,9 +2,9 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 
-use crate::app::{App, AppMode, MENU_ACTIONS, MenuAction};
+use crate::app::{App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction};
 
 use super::helpers::{anchored_rect, centered_rect, inset_rect, key_hint, line_kv, truncate_to};
 
@@ -28,6 +28,7 @@ pub(crate) fn render_frame(frame: &mut Frame, app: &mut App) {
 
     render_header(frame, chunks[0], app);
     render_body(frame, chunks[1], app);
+    app.layout.footer_rect = Some(chunks[2]);
     render_footer(frame, chunks[2], app);
 
     match app.mode {
@@ -206,7 +207,11 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &App) {
     if let Some(session) = app.selected_session() {
         let inspector_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(9), Constraint::Min(3)])
+            .constraints([
+                Constraint::Length(9),
+                Constraint::Min(3),
+                Constraint::Min(3),
+            ])
             .split(inner);
 
         let metadata = vec![
@@ -236,30 +241,55 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &App) {
             inspector_chunks[0],
         );
 
-        let preview_block = Block::default()
+        let console_block = Block::default()
             .title(" Console Preview ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::DarkGray));
-        let preview_inner = preview_block.inner(inspector_chunks[1]);
-        frame.render_widget(preview_block, inspector_chunks[1]);
+        let console_inner = console_block.inner(inspector_chunks[1]);
+        frame.render_widget(console_block, inspector_chunks[1]);
 
-        let preview = app
-            .pane_preview_cache
-            .get(&session.session_key)
+        let agent_block = Block::default()
+            .title(" Agent Preview ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray));
+        let agent_inner = agent_block.inner(inspector_chunks[2]);
+        frame.render_widget(agent_block, inspector_chunks[2]);
+
+        let preview = app.pane_preview_cache.get(&session.session_key).cloned();
+
+        let console_preview = preview
+            .as_ref()
             .map(|value| {
-                if value.trim().is_empty() {
+                if value.console.trim().is_empty() {
                     String::from("(console pane is empty)")
                 } else {
-                    value.clone()
+                    value.console.clone()
                 }
             })
-            .unwrap_or_else(|| String::from("Loading preview..."));
+            .unwrap_or_else(|| String::from("Loading console preview..."));
+
+        let agent_preview = preview
+            .as_ref()
+            .map(|value| {
+                if value.agent.trim().is_empty() {
+                    String::from("(agent pane is empty)")
+                } else {
+                    value.agent.clone()
+                }
+            })
+            .unwrap_or_else(|| String::from("Loading agent preview..."));
 
         frame.render_widget(
-            Paragraph::new(preview)
+            Paragraph::new(console_preview)
                 .style(Style::default().fg(Color::Gray))
                 .wrap(Wrap { trim: false }),
-            preview_inner,
+            console_inner,
+        );
+        frame.render_widget(
+            Paragraph::new(agent_preview)
+                .style(Style::default().fg(Color::Gray))
+                .wrap(Wrap { trim: false }),
+            agent_inner,
         );
     } else {
         frame.render_widget(
@@ -279,52 +309,21 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
         .unwrap_or_else(|| String::from("never refreshed"));
 
     let mut mode_hints: Vec<Span<'static>> = Vec::new();
-    match app.mode {
-        AppMode::Normal => {
-            mode_hints.extend(key_hint("q", "quit"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("arrows/hjkl", "navigate"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("r", "refresh"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("i", "inspector"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("enter", "actions"));
+    let actions = footer_actions_for_mode(app.mode);
+    for (index, action) in actions.iter().enumerate() {
+        if index > 0 {
+            mode_hints.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
         }
-        AppMode::ActionMenu => {
-            mode_hints.extend(key_hint("j/k", "menu"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("enter", "select"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("1-8", "quick"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("esc", "close"));
-        }
-        AppMode::ConfirmKill | AppMode::ConfirmKillAll => {
-            mode_hints.extend(key_hint("y/enter", "confirm"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("n/esc", "cancel"));
-        }
-        AppMode::SendInput => {
-            mode_hints.extend(key_hint("enter", "send"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("esc", "cancel"));
-        }
-        AppMode::SpawnInput => {
-            mode_hints.extend(key_hint("tab", "next field"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("enter", "spawn"));
-            mode_hints.push(Span::raw(" | "));
-            mode_hints.extend(key_hint("esc", "cancel"));
-        }
+        let hovered = app.footer_hover_action == Some(*action);
+        mode_hints.extend(footer_hint(*action, hovered));
     }
 
-    mode_hints.push(Span::raw(" | "));
+    mode_hints.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
     mode_hints.push(Span::styled(
         app.status_message.as_str().to_owned(),
         Style::default().fg(Color::White),
     ));
-    mode_hints.push(Span::raw(" | "));
+    mode_hints.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
     mode_hints.push(Span::styled(refresh, Style::default().fg(Color::DarkGray)));
 
     let footer = Line::from(mode_hints);
@@ -444,79 +443,223 @@ fn render_kill_all_confirmation(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_widget(body, inner);
 }
 
-fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App, title: &str) {
+fn render_input_overlay(frame: &mut Frame, area: Rect, app: &mut App, title: &str) {
     let popup_height = if app.mode == AppMode::SpawnInput {
-        10
+        11
     } else {
         6
     };
     let popup = centered_rect(70, popup_height, area);
+    app.layout.overlay.dialog_rect = Some(popup);
+    app.layout.overlay.field_rects.clear();
+    app.layout.overlay.prompt_editor_rect = None;
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
         .title(format!(" {} ", title))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Blue));
+        .border_style(Style::default().fg(Color::Cyan))
+        .border_type(BorderType::Rounded)
+        .title_style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
     let lines = if app.mode == AppMode::SpawnInput {
-        vec![
-            form_line(
+        let fields = vec![
+            (
                 "Session",
                 app.spawn_form.session_name.as_str(),
-                app.spawn_form.active_field == 0,
+                "(auto city name)",
             ),
-            form_line(
-                "Agent",
-                app.spawn_form.agent_type.as_str(),
-                app.spawn_form.active_field == 1,
-            ),
-            form_line(
-                "Model",
-                app.spawn_form.model.as_str(),
-                app.spawn_form.active_field == 2,
-            ),
-            form_line(
+            ("Agent", app.spawn_form.agent_type.as_str(), "opencode"),
+            ("Model", app.spawn_form.model.as_str(), "(optional)"),
+            (
                 "Prompt",
                 app.spawn_form.prompt.as_str(),
-                app.spawn_form.active_field == 3,
+                "(inline text or file path)",
             ),
-            Line::from(""),
-            Line::from(Span::styled(
-                "[tab] next field  [enter] spawn  [esc] cancel",
-                Style::default().fg(Color::Gray),
-            )),
-        ]
+        ];
+
+        let mut form_lines: Vec<Line<'static>> = Vec::new();
+        for (index, (label, value, placeholder)) in fields.iter().enumerate() {
+            let y = inner.y.saturating_add(index as u16);
+            app.layout.overlay.field_rects.push(Rect {
+                x: inner.x,
+                y,
+                width: inner.width,
+                height: 1,
+            });
+            form_lines.push(form_line(
+                label,
+                value,
+                placeholder,
+                app.spawn_form.active_field == index,
+            ));
+        }
+
+        let editor_line_y = inner.y.saturating_add(5);
+        app.layout.overlay.prompt_editor_rect = Some(Rect {
+            x: inner.x,
+            y: editor_line_y,
+            width: inner.width,
+            height: 1,
+        });
+
+        form_lines.push(Line::from(""));
+        form_lines.push(prompt_editor_line());
+        form_lines.push(Line::from(""));
+        form_lines.push(footer_hint_line_for_mode(AppMode::SpawnInput));
+        form_lines
     } else {
-        vec![
+        let mut dialog_lines = vec![
             Line::from("Command:"),
             Line::from(Span::styled(
                 app.input_buffer.as_str(),
                 Style::default().fg(Color::White),
             )),
             Line::from(""),
-            Line::from(Span::styled(
-                "[enter] submit  [esc] cancel",
-                Style::default().fg(Color::Gray),
-            )),
-        ]
+        ];
+        dialog_lines.push(footer_hint_line_for_mode(AppMode::SendInput));
+        dialog_lines
     };
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
 }
 
-fn form_line(label: &str, value: &str, active: bool) -> Line<'static> {
+fn form_line(label: &str, value: &str, placeholder: &str, active: bool) -> Line<'static> {
+    let mut rendered = if value.is_empty() && !active {
+        placeholder.to_owned()
+    } else {
+        value.to_owned()
+    };
+    if active {
+        rendered.push('█');
+    }
+
+    let placeholder_style = if value.is_empty() && !active {
+        Style::default().fg(Color::DarkGray)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
     let value_style = if active {
         Style::default()
             .fg(Color::White)
             .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::Gray)
+        placeholder_style
     };
     Line::from(vec![
-        Span::styled(format!("{label}: "), Style::default().fg(Color::DarkGray)),
-        Span::styled(value.to_owned(), value_style),
+        Span::styled(
+            format!("{:>8}", label),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            " ▏",
+            if active {
+                Style::default().fg(Color::Cyan)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        ),
+        Span::styled(rendered, value_style),
     ])
+}
+
+fn prompt_editor_line() -> Line<'static> {
+    let mut spans = Vec::new();
+    spans.extend(key_hint("e", "edit prompt in $EDITOR"));
+    Line::from(spans)
+}
+
+fn footer_actions_for_mode(mode: AppMode) -> Vec<FooterHotkeyAction> {
+    match mode {
+        AppMode::Normal => vec![
+            FooterHotkeyAction::Quit,
+            FooterHotkeyAction::Navigate,
+            FooterHotkeyAction::Refresh,
+            FooterHotkeyAction::ToggleInspector,
+            FooterHotkeyAction::OpenActions,
+            FooterHotkeyAction::Attach,
+            FooterHotkeyAction::Spawn,
+            FooterHotkeyAction::Kill,
+        ],
+        AppMode::ActionMenu => vec![
+            FooterHotkeyAction::FormSubmit,
+            FooterHotkeyAction::FormCancel,
+        ],
+        AppMode::ConfirmKill | AppMode::ConfirmKillAll => {
+            vec![FooterHotkeyAction::Confirm, FooterHotkeyAction::Cancel]
+        }
+        AppMode::SendInput => vec![
+            FooterHotkeyAction::FormSubmit,
+            FooterHotkeyAction::FormCancel,
+        ],
+        AppMode::SpawnInput => vec![
+            FooterHotkeyAction::FormNextField,
+            FooterHotkeyAction::FormEditPrompt,
+            FooterHotkeyAction::FormSubmit,
+            FooterHotkeyAction::FormCancel,
+        ],
+    }
+}
+
+fn footer_hint(action: FooterHotkeyAction, hovered: bool) -> Vec<Span<'static>> {
+    let key_style = if hovered {
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
+    };
+    vec![
+        Span::styled(format!(" {} ", action.key()), key_style),
+        Span::styled(
+            format!(" {}", action.label()),
+            Style::default().fg(Color::Gray),
+        ),
+    ]
+}
+
+fn footer_hint_line_for_mode(mode: AppMode) -> Line<'static> {
+    let actions = footer_actions_for_mode(mode);
+    let mut spans = Vec::new();
+    for (index, action) in actions.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
+        }
+        spans.extend(footer_hint(*action, false));
+    }
+    Line::from(spans)
+}
+
+pub(super) fn footer_hotkey_hit_test(app: &App, col: u16, row: u16) -> Option<FooterHotkeyAction> {
+    let area = app.layout.footer_rect?;
+    if row != area.y || col < area.x || col >= area.right() {
+        return None;
+    }
+
+    let actions = footer_actions_for_mode(app.mode);
+    let mut cursor_x = area.x;
+    for (index, action) in actions.iter().enumerate() {
+        if index > 0 {
+            cursor_x = cursor_x.saturating_add(3);
+        }
+        let key_width = action.key().chars().count() as u16 + 2;
+        if col >= cursor_x && col < cursor_x.saturating_add(key_width) {
+            return Some(*action);
+        }
+        cursor_x = cursor_x.saturating_add(key_width);
+        cursor_x = cursor_x.saturating_add(action.label().chars().count() as u16 + 1);
+    }
+
+    None
 }
 
 fn status_color(status: &str) -> Color {

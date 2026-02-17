@@ -29,6 +29,77 @@ pub enum MenuAction {
     CloseMenu,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FooterHotkeyAction {
+    Quit,
+    Navigate,
+    Refresh,
+    ToggleInspector,
+    OpenActions,
+    Attach,
+    Spawn,
+    Kill,
+    FormNextField,
+    FormSubmit,
+    FormCancel,
+    FormEditPrompt,
+    Confirm,
+    Cancel,
+}
+
+impl FooterHotkeyAction {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Quit => "q",
+            Self::Navigate => "arrows/hjkl",
+            Self::Refresh => "r",
+            Self::ToggleInspector => "i",
+            Self::OpenActions => "enter",
+            Self::Attach => "a",
+            Self::Spawn => "s",
+            Self::Kill => "x",
+            Self::FormNextField => "tab",
+            Self::FormSubmit => "enter",
+            Self::FormCancel => "esc",
+            Self::FormEditPrompt => "e",
+            Self::Confirm => "y/enter",
+            Self::Cancel => "n/esc",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Quit => "quit",
+            Self::Navigate => "navigate",
+            Self::Refresh => "refresh",
+            Self::ToggleInspector => "inspector",
+            Self::OpenActions => "actions",
+            Self::Attach => "attach",
+            Self::Spawn => "spawn",
+            Self::Kill => "kill",
+            Self::FormNextField => "next field",
+            Self::FormSubmit => "submit",
+            Self::FormCancel => "cancel",
+            Self::FormEditPrompt => "edit prompt",
+            Self::Confirm => "confirm",
+            Self::Cancel => "cancel",
+        }
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct OverlayLayoutCache {
+    pub dialog_rect: Option<Rect>,
+    pub field_rects: Vec<Rect>,
+    pub prompt_editor_rect: Option<Rect>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PanePreview {
+    pub console: String,
+    pub agent: String,
+}
+
 impl MenuAction {
     pub fn label(self) -> &'static str {
         match self {
@@ -67,7 +138,7 @@ pub struct SpawnForm {
 impl Default for SpawnForm {
     fn default() -> Self {
         Self {
-            session_name: String::from("tinyverse_"),
+            session_name: String::new(),
             agent_type: String::from("opencode"),
             model: String::new(),
             prompt: String::new(),
@@ -106,6 +177,8 @@ pub struct LayoutCache {
     pub divider_x: Option<u16>,
     pub action_menu_rect: Option<Rect>,
     pub confirm_rect: Option<Rect>,
+    pub footer_rect: Option<Rect>,
+    pub overlay: OverlayLayoutCache,
 }
 
 pub struct App {
@@ -121,7 +194,8 @@ pub struct App {
     pub action_menu_anchor: Option<(u16, u16)>,
     pub input_buffer: String,
     pub spawn_form: SpawnForm,
-    pub pane_preview_cache: HashMap<String, String>,
+    pub pane_preview_cache: HashMap<String, PanePreview>,
+    pub footer_hover_action: Option<FooterHotkeyAction>,
     pub should_quit: bool,
     pub status_message: String,
     pub last_refresh_at: Option<Instant>,
@@ -144,6 +218,7 @@ impl App {
             input_buffer: String::new(),
             spawn_form: SpawnForm::default(),
             pane_preview_cache: HashMap::new(),
+            footer_hover_action: None,
             should_quit: false,
             status_message: String::from("Starting tinyverse TUI"),
             last_refresh_at: None,
@@ -207,7 +282,11 @@ impl App {
     }
 
     pub fn reset_spawn_form(&mut self) {
+        let agent = self.spawn_form.agent_type.clone();
+        let model = self.spawn_form.model.clone();
         self.spawn_form = SpawnForm::default();
+        self.spawn_form.agent_type = agent;
+        self.spawn_form.model = model;
     }
 
     pub fn close_action_menu(&mut self) {

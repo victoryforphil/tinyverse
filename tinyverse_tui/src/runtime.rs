@@ -17,6 +17,7 @@ use tinyverse_lib::SessionStore;
 
 use crate::TuiRunOptions;
 use crate::app::App;
+use crate::prefs;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(120);
 
@@ -25,6 +26,9 @@ pub fn run(options: TuiRunOptions) -> Result<()> {
     store.reconcile_now()?;
 
     let mut app = App::new(options);
+    if let Ok(saved_prefs) = prefs::load() {
+        saved_prefs.apply_to_spawn_form(&mut app.spawn_form);
+    }
     app.refresh(&mut store)?;
     events::refresh_selected_preview(&mut app);
 

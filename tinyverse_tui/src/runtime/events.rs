@@ -1,5 +1,7 @@
 use std::io;
+use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
@@ -10,9 +12,11 @@ use tinyverse_lib::{
     SessionTarget, SpawnSessionOptions, TmuxClient, resolve_session_name,
 };
 
-use crate::app::{App, AppMode, MENU_ACTIONS, MenuAction};
+use crate::app::{App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction, PanePreview};
+use crate::prefs::{self, TuiPrefs};
 
 use super::helpers::rect_contains;
+use super::render;
 use super::{restore_terminal, setup_terminal};
 
 pub(crate) fn handle_event(
@@ -125,6 +129,7 @@ fn handle_key_event(
                 app.reset_spawn_form();
             }
             KeyCode::Enter => spawn_session_from_input(app, store)?,
+            KeyCode::Char('e') => open_prompt_in_editor(terminal, app)?,
             KeyCode::Tab => app.spawn_form.next_field(),
             KeyCode::BackTab => app.spawn_form.prev_field(),
             KeyCode::Backspace => {
@@ -146,6 +151,14 @@ fn handle_mouse_event(
 ) -> Result<()> {
     let x = mouse.column;
     let y = mouse.row;
+    app.footer_hover_action = render::footer_hotkey_hit_test(app, x, y);
+
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        && let Some(action) = render::footer_hotkey_hit_test(app, x, y)
+    {
+        execute_footer_action(action, terminal, app, store)?;
+        return Ok(());
+    }
 
     if app.mode == AppMode::ActionMenu {
         if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
@@ -187,7 +200,37 @@ fn handle_mouse_event(
         return Ok(());
     }
 
-    if matches!(app.mode, AppMode::SendInput | AppMode::SpawnInput) {
+    if app.mode == AppMode::SendInput {
+        return Ok(());
+    }
+
+    if app.mode == AppMode::SpawnInput {
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if let Some(dialog_rect) = app.layout.overlay.dialog_rect
+                && !rect_contains(dialog_rect, x, y)
+            {
+                app.mode = AppMode::Normal;
+                app.reset_spawn_form();
+                return Ok(());
+            }
+
+            if let Some(editor_rect) = app.layout.overlay.prompt_editor_rect
+                && rect_contains(editor_rect, x, y)
+            {
+                open_prompt_in_editor(terminal, app)?;
+                return Ok(());
+            }
+
+            if let Some(index) = app
+                .layout
+                .overlay
+                .field_rects
+                .iter()
+                .position(|rect| rect_contains(*rect, x, y))
+            {
+                app.spawn_form.active_field = index;
+            }
+        }
         return Ok(());
     }
 
@@ -354,7 +397,7 @@ fn send_console_input(app: &mut App) {
 
 fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<()> {
     let mut session_name = app.spawn_form.session_name.trim().to_owned();
-    if session_name.is_empty() {
+    if session_name.is_empty() || session_name == "tinyverse_" {
         session_name = resolve_session_name(None, store)?;
     }
 
@@ -366,10 +409,12 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
 
     let prompt = app.spawn_form.prompt.trim().to_owned();
     let model = app.spawn_form.model.trim().to_owned();
+    save_spawn_prefs(app);
 
     let tmux_session_name = session_name.clone();
     let mut spawn_options = SpawnSessionOptions::new(&tmux_session_name);
-    spawn_options.agent_command = Some(build_agent_command(&agent_type, &model, &prompt));
+    let resolved_prompt = resolve_prompt_input(&prompt);
+    spawn_options.agent_command = Some(build_agent_command(&agent_type, &model, &resolved_prompt));
     let spawn_result = TmuxClient::new().spawn_session(spawn_options);
 
     let spawned = match spawn_result {
@@ -382,7 +427,7 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
 
     let created = store.create_session(&CreateSessionInput {
         session_name: session_name.clone(),
-        agent_type: String::from("opencode"),
+        agent_type: agent_type.clone(),
         description: Some(String::from("Spawned from tinyverse tui")),
         tmux_session_name,
         tmux_session_id: None,
@@ -479,15 +524,127 @@ pub(crate) fn refresh_selected_preview(app: &mut App) {
         return;
     };
 
-    let mut options = CapturePaneOptions::new(SessionTarget::new(session.tmux_session_name));
-    options.pane = Some(PaneTarget::Role(PanelRole::Console));
-    options.start_line = Some(-60);
+    let session_target = SessionTarget::new(session.tmux_session_name);
 
-    let text = match TmuxClient::new().capture_pane(options) {
-        Ok(captured) => captured.text,
-        Err(error) => format!("Preview unavailable: {error}"),
+    let console = {
+        let mut options = CapturePaneOptions::new(session_target.clone());
+        options.pane = Some(PaneTarget::Role(PanelRole::Console));
+        options.start_line = Some(-40);
+        match TmuxClient::new().capture_pane(options) {
+            Ok(captured) => captured.text,
+            Err(error) => format!("Preview unavailable: {error}"),
+        }
     };
-    app.pane_preview_cache.insert(session.session_key, text);
+
+    let agent = {
+        let mut options = CapturePaneOptions::new(session_target);
+        options.pane = Some(PaneTarget::Role(PanelRole::Agent));
+        options.start_line = Some(-40);
+        match TmuxClient::new().capture_pane(options) {
+            Ok(captured) => captured.text,
+            Err(error) => format!("Preview unavailable: {error}"),
+        }
+    };
+
+    app.pane_preview_cache
+        .insert(session.session_key, PanePreview { console, agent });
+}
+
+fn execute_footer_action(
+    action: FooterHotkeyAction,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+    store: &mut SessionStore,
+) -> Result<()> {
+    match action {
+        FooterHotkeyAction::Quit => app.should_quit = true,
+        FooterHotkeyAction::Navigate => {}
+        FooterHotkeyAction::Refresh => refresh_sessions_and_preview(app, store)?,
+        FooterHotkeyAction::ToggleInspector => app.toggle_inspector(),
+        FooterHotkeyAction::OpenActions => app.open_action_menu(),
+        FooterHotkeyAction::Attach => attach_selected_session(terminal, app)?,
+        FooterHotkeyAction::Spawn => {
+            app.reset_spawn_form();
+            app.mode = AppMode::SpawnInput;
+        }
+        FooterHotkeyAction::Kill => {
+            if app.selected_session().is_some() {
+                app.mode = AppMode::ConfirmKill;
+            } else {
+                app.status_message = String::from("No session selected");
+            }
+        }
+        FooterHotkeyAction::FormNextField => {
+            if app.mode == AppMode::SpawnInput {
+                app.spawn_form.next_field();
+            }
+        }
+        FooterHotkeyAction::FormSubmit => match app.mode {
+            AppMode::ActionMenu => {
+                execute_menu_action(app.selected_menu_action(), terminal, app, store)?
+            }
+            AppMode::ConfirmKill => {
+                kill_selected_session(app, store)?;
+                app.mode = AppMode::Normal;
+            }
+            AppMode::ConfirmKillAll => {
+                kill_all_sessions(app, store)?;
+                app.mode = AppMode::Normal;
+            }
+            AppMode::SendInput => send_console_input(app),
+            AppMode::SpawnInput => spawn_session_from_input(app, store)?,
+            _ => {}
+        },
+        FooterHotkeyAction::FormCancel => match app.mode {
+            AppMode::ActionMenu => app.close_action_menu(),
+            AppMode::ConfirmKill => {
+                app.mode = AppMode::ActionMenu;
+                app.status_message = String::from("Kill canceled");
+            }
+            AppMode::ConfirmKillAll => {
+                app.mode = AppMode::ActionMenu;
+                app.status_message = String::from("Kill all canceled");
+            }
+            AppMode::SendInput => {
+                app.mode = AppMode::Normal;
+                app.input_buffer.clear();
+            }
+            AppMode::SpawnInput => {
+                app.mode = AppMode::Normal;
+                app.reset_spawn_form();
+            }
+            _ => {}
+        },
+        FooterHotkeyAction::FormEditPrompt => {
+            if app.mode == AppMode::SpawnInput {
+                open_prompt_in_editor(terminal, app)?;
+            }
+        }
+        FooterHotkeyAction::Confirm => match app.mode {
+            AppMode::ConfirmKill => {
+                kill_selected_session(app, store)?;
+                app.mode = AppMode::Normal;
+            }
+            AppMode::ConfirmKillAll => {
+                kill_all_sessions(app, store)?;
+                app.mode = AppMode::Normal;
+            }
+            _ => {}
+        },
+        FooterHotkeyAction::Cancel => match app.mode {
+            AppMode::ConfirmKill => {
+                app.mode = AppMode::ActionMenu;
+                app.status_message = String::from("Kill canceled");
+            }
+            AppMode::ConfirmKillAll => {
+                app.mode = AppMode::ActionMenu;
+                app.status_message = String::from("Kill all canceled");
+            }
+            _ => {}
+        },
+    }
+
+    Ok(())
 }
 
 fn build_agent_command(agent: &str, model: &str, prompt: &str) -> String {
@@ -511,6 +668,91 @@ fn shell_escape(value: &str) -> String {
     }
     let escaped = value.replace('\'', "'\"'\"'");
     format!("'{escaped}'")
+}
+
+fn resolve_prompt_input(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if Path::new(trimmed).is_file()
+        && let Ok(contents) = std::fs::read_to_string(trimmed)
+    {
+        return contents.trim().to_owned();
+    }
+
+    trimmed.to_owned()
+}
+
+fn save_spawn_prefs(app: &App) {
+    let prefs = TuiPrefs {
+        spawn_agent: Some(app.spawn_form.agent_type.trim().to_owned()),
+        spawn_model: Some(app.spawn_form.model.trim().to_owned()),
+    };
+
+    let _ = prefs::save(&prefs);
+}
+
+fn open_prompt_in_editor(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    app: &mut App,
+) -> Result<()> {
+    let prompt_seed = app.spawn_form.prompt.trim();
+    let existing_path = Path::new(prompt_seed);
+
+    let path = if !prompt_seed.is_empty() && existing_path.is_file() {
+        existing_path.to_path_buf()
+    } else {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let path = std::env::temp_dir().join(format!("tinyverse_prompt_{stamp}.md"));
+        let initial = if prompt_seed.is_empty() {
+            String::from("# Prompt\n\n")
+        } else {
+            prompt_seed.to_owned()
+        };
+        std::fs::write(&path, initial)?;
+        path
+    };
+
+    let editor = std::env::var("VISUAL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            std::env::var("EDITOR")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| String::from("vi"));
+
+    restore_terminal(terminal)?;
+    let status_result = Command::new("sh")
+        .arg("-c")
+        .arg(format!("{editor} \"{}\"", path.display()))
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status();
+    *terminal = setup_terminal()?;
+
+    match status_result {
+        Ok(status) if status.success() => {
+            app.spawn_form.prompt = path.display().to_string();
+            app.spawn_form.active_field = 3;
+            app.status_message = format!("Prompt edited at {}", path.display());
+        }
+        Ok(status) => {
+            app.status_message = format!("Editor exited with {:?}", status.code());
+        }
+        Err(error) => {
+            app.status_message = format!("Failed to launch editor: {error}");
+        }
+    }
+
+    Ok(())
 }
 
 fn digit_to_index(ch: char) -> Option<usize> {

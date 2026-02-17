@@ -1,4 +1,5 @@
 mod app;
+mod prefs;
 mod runtime;
 
 use std::time::Duration;

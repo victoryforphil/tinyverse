@@ -1,6 +1,6 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 554
+assertion_line: 698
 expression: snapshot
 ---
 tinyverse tui  |  0 session(s)
@@ -32,4 +32,4 @@ tinyverse tui  |  0 session(s)
                                                                     │                              │
                                                                     │                              │
                                                                     └──────────────────────────────┘
-[q] quit | [arrows/hjkl] navigate | [r] refresh | [i] inspector | [enter] actions | No sessions foun
+ q  quit |  arrows/hjkl  navigate |  r  refresh |  i  inspector |  enter  actions |  a  attach |  s

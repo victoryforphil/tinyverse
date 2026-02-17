@@ -1,6 +1,6 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 576
+assertion_line: 720
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
@@ -15,7 +15,7 @@ tinyverse tui  |  1 session(s)
                                                                                   │description: Snapshot test session  │
                                                                                   │                                    │
                                                                                   │┌ Console Preview ─────────────────┐│
-                                                                                  ││Loading preview...                ││
+                                                                                  ││Loading console preview...        ││
                                                                                   ││                                  ││
                                ┌ Confirm Kill ──────────────────────────────────────────┐                             ││
                                │Kill session `tinyverse_alpha`?                         │                             ││
@@ -25,9 +25,9 @@ tinyverse tui  |  1 session(s)
                                │                                                        │                             ││
                                └────────────────────────────────────────────────────────┘                             ││
                                                                                   ││                                  ││
-                                                                                  ││                                  ││
-                                                                                  ││                                  ││
-                                                                                  ││                                  ││
+                                                                                  │└──────────────────────────────────┘│
+                                                                                  │┌ Agent Preview ───────────────────┐│
+                                                                                  ││Loading agent preview...          ││
                                                                                   ││                                  ││
                                                                                   ││                                  ││
                                                                                   ││                                  ││
@@ -38,4 +38,4 @@ tinyverse tui  |  1 session(s)
                                                                                   ││                                  ││
                                                                                   │└──────────────────────────────────┘│
                                                                                   └────────────────────────────────────┘
-[y/enter] confirm | [n/esc] cancel | Starting tinyverse TUI | never refreshed
+ y/enter  confirm |  n/esc  cancel | Starting tinyverse TUI | never refreshed
