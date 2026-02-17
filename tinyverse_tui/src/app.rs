@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use anyhow::Result;
@@ -7,7 +7,7 @@ use tinyverse_lib::{SessionStore, StoredSession};
 
 use crate::TuiRunOptions;
 use crate::chat::ChatState;
-use crate::chat_bridge::ChatBridge;
+use crate::chat_bridge::{ChatBridge, ChatSessionSummary};
 use crate::theme::UiTheme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +42,7 @@ pub enum FooterHotkeyAction {
     Attach,
     Spawn,
     Kill,
+    SessionView,
     SidebarTab,
     FormNextField,
     FormSubmit,
@@ -62,6 +63,7 @@ impl FooterHotkeyAction {
             Self::Attach => "a",
             Self::Spawn => "s",
             Self::Kill => "x",
+            Self::SessionView => "v",
             Self::SidebarTab => "1-3/lr",
             Self::FormNextField => "tab",
             Self::FormSubmit => "enter",
@@ -82,6 +84,7 @@ impl FooterHotkeyAction {
             Self::Attach => "attach",
             Self::Spawn => "spawn",
             Self::Kill => "kill",
+            Self::SessionView => "view",
             Self::SidebarTab => "tabs",
             Self::FormNextField => "next field",
             Self::FormSubmit => "submit",
@@ -98,6 +101,69 @@ pub enum SidebarTab {
     Console,
     Agent,
     Chat,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionsViewMode {
+    Graphical,
+    Tree,
+}
+
+impl SessionsViewMode {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Graphical => "Graph",
+            Self::Tree => "Tree",
+        }
+    }
+
+    pub fn all() -> [Self; 2] {
+        [Self::Graphical, Self::Tree]
+    }
+
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Graphical => Self::Tree,
+            Self::Tree => Self::Graphical,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionTreeNode {
+    SessionRoot {
+        session_index: usize,
+    },
+    SidebarPane {
+        session_index: usize,
+        tab: SidebarTab,
+    },
+    ChatSession {
+        session_index: usize,
+        chat_session_id: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionTreeRow {
+    pub node: SessionTreeNode,
+    pub label: String,
+    pub depth: usize,
+    pub is_last: bool,
+    pub ancestors_are_last: Vec<bool>,
+}
+
+impl SessionTreeRow {
+    pub fn prefix(&self) -> String {
+        tree_prefix(self.depth, self.is_last, &self.ancestors_are_last)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SessionTreeBuildNode {
+    node: SessionTreeNode,
+    label: String,
+    children: Vec<SessionTreeBuildNode>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -290,6 +356,8 @@ pub struct LayoutCache {
     pub action_menu_rect: Option<Rect>,
     pub confirm_rect: Option<Rect>,
     pub footer_rect: Option<Rect>,
+    pub sessions_view_tab_rects: Vec<(SessionsViewMode, Rect)>,
+    pub session_tree_row_rects: Vec<(usize, Rect)>,
     pub sidebar_tab_rects: Vec<(SidebarTab, Rect)>,
     pub sidebar_preview_rect: Option<Rect>,
     pub overlay: OverlayLayoutCache,
@@ -313,6 +381,10 @@ pub struct App {
     pub action_menu_anchor: Option<(u16, u16)>,
     pub input_buffer: String,
     pub spawn_form: SpawnForm,
+    pub sessions_view_mode: SessionsViewMode,
+    pub session_tree_rows: Vec<SessionTreeRow>,
+    pub session_tree_cursor: usize,
+    pub session_tree_scroll: usize,
     pub sidebar_tab: SidebarTab,
     pub chat: ChatState,
     pub chat_bridge: ChatBridge,
@@ -344,6 +416,10 @@ impl App {
             action_menu_anchor: None,
             input_buffer: String::new(),
             spawn_form: SpawnForm::default(),
+            sessions_view_mode: SessionsViewMode::Graphical,
+            session_tree_rows: Vec::new(),
+            session_tree_cursor: 0,
+            session_tree_scroll: 0,
             sidebar_tab: SidebarTab::Console,
             chat: ChatState::default(),
             chat_bridge: ChatBridge::from_env(),
@@ -364,12 +440,16 @@ impl App {
         if self.sessions.is_empty() {
             self.selected_index = 0;
             self.scroll_row = 0;
+            self.session_tree_rows.clear();
+            self.session_tree_cursor = 0;
+            self.session_tree_scroll = 0;
             self.status_message = String::from("No sessions found");
         } else {
             if self.selected_index >= self.sessions.len() {
                 self.selected_index = self.sessions.len() - 1;
             }
             self.status_message = format!("Loaded {} session(s)", self.sessions.len());
+            self.sync_tree_cursor_to_active_target();
         }
         self.last_refresh_at = Some(Instant::now());
         Ok(())
@@ -380,6 +460,7 @@ impl App {
             return;
         }
         self.selected_index = (self.selected_index + 1) % self.sessions.len();
+        self.sync_tree_cursor_to_active_target();
     }
 
     pub fn select_prev(&mut self) {
@@ -391,6 +472,7 @@ impl App {
         } else {
             self.selected_index - 1
         };
+        self.sync_tree_cursor_to_active_target();
     }
 
     pub fn selected_session(&self) -> Option<&StoredSession> {
@@ -411,6 +493,7 @@ impl App {
         if self.sidebar_tab == SidebarTab::Chat {
             self.chat_bridge.sync_now(&mut self.chat);
         }
+        self.sync_tree_cursor_to_active_target();
         self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
     }
 
@@ -419,6 +502,7 @@ impl App {
         if self.sidebar_tab == SidebarTab::Chat {
             self.chat_bridge.sync_now(&mut self.chat);
         }
+        self.sync_tree_cursor_to_active_target();
         self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
     }
 
@@ -427,7 +511,216 @@ impl App {
         if self.sidebar_tab == SidebarTab::Chat {
             self.chat_bridge.sync_now(&mut self.chat);
         }
+        self.sync_tree_cursor_to_active_target();
         self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
+    }
+
+    pub fn toggle_sessions_view_mode(&mut self) {
+        let next = self.sessions_view_mode.toggle();
+        self.set_sessions_view_mode(next);
+    }
+
+    pub fn set_sessions_view_mode(&mut self, mode: SessionsViewMode) {
+        self.sessions_view_mode = mode;
+        self.sync_tree_cursor_to_active_target();
+        self.status_message = format!("Sessions view: {}", self.sessions_view_mode.title());
+    }
+
+    pub fn rebuild_tree_rows_preserving_cursor(&mut self) {
+        let previous_node = self
+            .session_tree_rows
+            .get(self.session_tree_cursor)
+            .map(|row| row.node.clone());
+        self.session_tree_rows = self.build_session_tree_rows();
+        self.session_tree_cursor = previous_node
+            .as_ref()
+            .and_then(|target| self.find_tree_row_index(target))
+            .unwrap_or_else(|| {
+                self.session_tree_cursor
+                    .min(self.session_tree_rows.len().saturating_sub(1))
+            });
+        self.session_tree_scroll = self
+            .session_tree_scroll
+            .min(self.session_tree_rows.len().saturating_sub(1));
+    }
+
+    pub fn move_tree_cursor_up(&mut self) {
+        if self.session_tree_rows.is_empty() {
+            return;
+        }
+        self.session_tree_cursor = if self.session_tree_cursor == 0 {
+            self.session_tree_rows.len() - 1
+        } else {
+            self.session_tree_cursor - 1
+        };
+    }
+
+    pub fn move_tree_cursor_down(&mut self) {
+        if self.session_tree_rows.is_empty() {
+            return;
+        }
+        self.session_tree_cursor = (self.session_tree_cursor + 1) % self.session_tree_rows.len();
+    }
+
+    pub fn set_tree_cursor(&mut self, index: usize) {
+        if self.session_tree_rows.is_empty() {
+            self.session_tree_cursor = 0;
+            return;
+        }
+        self.session_tree_cursor = index.min(self.session_tree_rows.len() - 1);
+    }
+
+    pub fn activate_tree_cursor(&mut self) {
+        let Some(row) = self
+            .session_tree_rows
+            .get(self.session_tree_cursor)
+            .cloned()
+        else {
+            return;
+        };
+
+        match row.node {
+            SessionTreeNode::SessionRoot { session_index } => {
+                if session_index < self.sessions.len() {
+                    self.selected_index = session_index;
+                    self.status_message = format!(
+                        "Selected session: {}",
+                        self.sessions[session_index].session_name
+                    );
+                    self.rebuild_tree_rows_preserving_cursor();
+                }
+            }
+            SessionTreeNode::SidebarPane { session_index, tab } => {
+                if session_index < self.sessions.len() {
+                    self.selected_index = session_index;
+                    self.set_sidebar_tab(tab);
+                }
+            }
+            SessionTreeNode::ChatSession {
+                session_index,
+                chat_session_id,
+            } => {
+                if session_index < self.sessions.len() {
+                    self.selected_index = session_index;
+                    self.sidebar_tab = SidebarTab::Chat;
+                    if self
+                        .chat_bridge
+                        .set_active_session(&mut self.chat, &chat_session_id)
+                    {
+                        self.status_message = format!("Chat session: {chat_session_id}");
+                    } else {
+                        self.status_message =
+                            format!("Unable to switch chat session: {chat_session_id}");
+                    }
+                    self.sync_tree_cursor_to_active_target();
+                }
+            }
+        }
+    }
+
+    pub fn sync_tree_cursor_to_active_target(&mut self) {
+        self.session_tree_rows = self.build_session_tree_rows();
+        if self.session_tree_rows.is_empty() {
+            self.session_tree_cursor = 0;
+            self.session_tree_scroll = 0;
+            return;
+        }
+
+        let selected_index = self
+            .selected_index
+            .min(self.sessions.len().saturating_sub(1));
+        let target = if self.sidebar_tab == SidebarTab::Chat {
+            if let Some(chat_session_id) = self.chat_bridge.active_session_id() {
+                SessionTreeNode::ChatSession {
+                    session_index: selected_index,
+                    chat_session_id: chat_session_id.to_owned(),
+                }
+            } else {
+                SessionTreeNode::SidebarPane {
+                    session_index: selected_index,
+                    tab: SidebarTab::Chat,
+                }
+            }
+        } else {
+            SessionTreeNode::SidebarPane {
+                session_index: selected_index,
+                tab: self.sidebar_tab,
+            }
+        };
+
+        self.session_tree_cursor = self
+            .find_tree_row_index(&target)
+            .or_else(|| {
+                self.find_tree_row_index(&SessionTreeNode::SessionRoot {
+                    session_index: selected_index,
+                })
+            })
+            .unwrap_or(0);
+        self.session_tree_scroll = self
+            .session_tree_scroll
+            .min(self.session_tree_rows.len().saturating_sub(1));
+    }
+
+    fn build_session_tree_rows(&self) -> Vec<SessionTreeRow> {
+        let mut roots = Vec::new();
+        let selected_session_index = self
+            .selected_index
+            .min(self.sessions.len().saturating_sub(1));
+
+        for (session_index, session) in self.sessions.iter().enumerate() {
+            let mut chat_children = Vec::new();
+            if session_index == selected_session_index {
+                chat_children =
+                    build_chat_session_nodes(session_index, self.chat_bridge.sessions());
+            }
+
+            let chat_label = if chat_children.is_empty() {
+                String::from("chat")
+            } else {
+                format!("chat ({})", chat_children.len())
+            };
+
+            roots.push(SessionTreeBuildNode {
+                node: SessionTreeNode::SessionRoot { session_index },
+                label: session.session_name.clone(),
+                children: vec![
+                    SessionTreeBuildNode {
+                        node: SessionTreeNode::SidebarPane {
+                            session_index,
+                            tab: SidebarTab::Console,
+                        },
+                        label: String::from("console"),
+                        children: Vec::new(),
+                    },
+                    SessionTreeBuildNode {
+                        node: SessionTreeNode::SidebarPane {
+                            session_index,
+                            tab: SidebarTab::Agent,
+                        },
+                        label: String::from("agent"),
+                        children: Vec::new(),
+                    },
+                    SessionTreeBuildNode {
+                        node: SessionTreeNode::SidebarPane {
+                            session_index,
+                            tab: SidebarTab::Chat,
+                        },
+                        label: chat_label,
+                        children: chat_children,
+                    },
+                ],
+            });
+        }
+
+        let mut rows = Vec::new();
+        flatten_tree_nodes(&roots, 0, &[], &mut rows);
+        rows
+    }
+
+    fn find_tree_row_index(&self, target: &SessionTreeNode) -> Option<usize> {
+        self.session_tree_rows
+            .iter()
+            .position(|row| row.node == *target)
     }
 
     pub fn open_action_menu(&mut self) {
@@ -464,4 +757,172 @@ impl App {
     pub fn selected_menu_action(&self) -> MenuAction {
         MENU_ACTIONS[self.action_menu_index]
     }
+}
+
+fn flatten_tree_nodes(
+    nodes: &[SessionTreeBuildNode],
+    depth: usize,
+    ancestors_are_last: &[bool],
+    rows: &mut Vec<SessionTreeRow>,
+) {
+    for (position, node) in nodes.iter().enumerate() {
+        let is_last = position + 1 == nodes.len();
+        rows.push(SessionTreeRow {
+            node: node.node.clone(),
+            label: node.label.clone(),
+            depth,
+            is_last,
+            ancestors_are_last: ancestors_are_last.to_vec(),
+        });
+
+        if !node.children.is_empty() {
+            let mut next_ancestors = ancestors_are_last.to_vec();
+            next_ancestors.push(is_last);
+            flatten_tree_nodes(&node.children, depth + 1, &next_ancestors, rows);
+        }
+    }
+}
+
+fn build_chat_session_nodes(
+    session_index: usize,
+    chat_sessions: &[ChatSessionSummary],
+) -> Vec<SessionTreeBuildNode> {
+    if chat_sessions.is_empty() {
+        return Vec::new();
+    }
+
+    let mut index_by_id = HashMap::new();
+    for (index, session) in chat_sessions.iter().enumerate() {
+        index_by_id.insert(session.id.clone(), index);
+    }
+
+    let mut children_by_parent: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut roots = Vec::new();
+    for (index, session) in chat_sessions.iter().enumerate() {
+        let parent_index = session
+            .parent_id
+            .as_deref()
+            .and_then(|id| index_by_id.get(id).copied())
+            .filter(|parent| *parent != index);
+        if let Some(parent) = parent_index {
+            children_by_parent.entry(parent).or_default().push(index);
+        } else {
+            roots.push(index);
+        }
+    }
+
+    let mut out = Vec::new();
+    let mut visited = HashSet::new();
+    for root in roots {
+        if let Some(node) = build_chat_session_node_recursive(
+            root,
+            session_index,
+            chat_sessions,
+            &children_by_parent,
+            &mut visited,
+        ) {
+            out.push(node);
+        }
+    }
+
+    for index in 0..chat_sessions.len() {
+        if visited.contains(&index) {
+            continue;
+        }
+        if let Some(node) = build_chat_session_node_recursive(
+            index,
+            session_index,
+            chat_sessions,
+            &children_by_parent,
+            &mut visited,
+        ) {
+            out.push(node);
+        }
+    }
+
+    out
+}
+
+fn build_chat_session_node_recursive(
+    index: usize,
+    session_index: usize,
+    chat_sessions: &[ChatSessionSummary],
+    children_by_parent: &HashMap<usize, Vec<usize>>,
+    visited: &mut HashSet<usize>,
+) -> Option<SessionTreeBuildNode> {
+    if !visited.insert(index) {
+        return None;
+    }
+
+    let session = chat_sessions.get(index)?;
+    let mut children = Vec::new();
+    if let Some(child_indexes) = children_by_parent.get(&index) {
+        for child in child_indexes {
+            if let Some(node) = build_chat_session_node_recursive(
+                *child,
+                session_index,
+                chat_sessions,
+                children_by_parent,
+                visited,
+            ) {
+                children.push(node);
+            }
+        }
+    }
+
+    Some(SessionTreeBuildNode {
+        node: SessionTreeNode::ChatSession {
+            session_index,
+            chat_session_id: session.id.clone(),
+        },
+        label: if session.title.trim().is_empty() {
+            session.id.clone()
+        } else {
+            truncate_label(&session.title, 44)
+        },
+        children,
+    })
+}
+
+fn tree_prefix(depth: usize, is_last: bool, ancestors_are_last: &[bool]) -> String {
+    let mut prefix = String::new();
+
+    for ancestor_is_last in ancestors_are_last.iter().take(depth.saturating_sub(1)) {
+        if *ancestor_is_last {
+            prefix.push_str("   ");
+        } else {
+            prefix.push_str("│  ");
+        }
+    }
+
+    if depth == 0 {
+        prefix.push_str("● ");
+        return prefix;
+    }
+
+    if is_last {
+        prefix.push_str("└─ ");
+    } else {
+        prefix.push_str("├─ ");
+    }
+
+    prefix
+}
+
+fn truncate_label(value: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+
+    let count = value.chars().count();
+    if count <= max_chars {
+        return value.to_owned();
+    }
+
+    if max_chars <= 1 {
+        return "…".to_owned();
+    }
+
+    let truncated = value.chars().take(max_chars - 1).collect::<String>();
+    format!("{truncated}…")
 }

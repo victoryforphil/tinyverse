@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::app::{
     ACTION_MENU_DANGER_SPLIT_AFTER, App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction,
-    SidebarTab,
+    SessionTreeNode, SessionsViewMode, SidebarTab,
 };
 use crate::chat::ChatMessageRole;
 
@@ -105,13 +105,13 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
             ])
             .split(top_area);
         app.layout.divider_x = Some(split[0].right());
-        render_cards(frame, split[0], app);
+        render_sessions_panel(frame, split[0], app);
         render_sidebar(frame, split[1], app);
     } else {
         app.layout.divider_x = None;
         app.layout.sidebar_tab_rects.clear();
         app.layout.sidebar_preview_rect = None;
-        render_cards(frame, top_area, app);
+        render_sessions_panel(frame, top_area, app);
     }
 
     if app.inspector_visible && main_chunks[1].height > 0 {
@@ -121,8 +121,17 @@ fn render_body(frame: &mut Frame, area: Rect, app: &mut App) {
 
 fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
     let panel = styled_panel("Sessions", true, &app.theme);
-    let inner = inset_rect(panel.inner(area), 2, 1);
+    let inner = inset_rect(panel.inner(area), 1, 1);
     frame.render_widget(panel, area);
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+    render_sessions_view_tabs(frame, app, sections[0]);
+    let inner = inset_rect(sections[1], 1, 0);
+
+    app.layout.session_tree_row_rects.clear();
 
     if app.sessions.is_empty() {
         let empty = Paragraph::new(vec![
@@ -347,6 +356,214 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         });
 
         frame.render_widget(body, card_inner);
+    }
+}
+
+fn render_sessions_panel(frame: &mut Frame, area: Rect, app: &mut App) {
+    match app.sessions_view_mode {
+        SessionsViewMode::Graphical => render_cards(frame, area, app),
+        SessionsViewMode::Tree => render_session_tree(frame, area, app),
+    }
+}
+
+fn render_sessions_view_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
+    app.layout.sessions_view_tab_rects.clear();
+    let mut spans = Vec::new();
+    let mut cursor_x = area.x;
+    for (index, mode) in SessionsViewMode::all().iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" ", Style::default().fg(app.theme.text_muted)));
+            cursor_x = cursor_x.saturating_add(1);
+        }
+
+        let selected = *mode == app.sessions_view_mode;
+        let label = mode.title();
+        let style = if selected {
+            Style::default()
+                .fg(app.theme.key_hint_key_fg)
+                .bg(app.theme.key_hint_key_bg)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(app.theme.text_secondary)
+                .bg(app.theme.pill_muted_bg)
+        };
+        let text = format!(" {label} ");
+        let width = text.chars().count() as u16;
+        app.layout.sessions_view_tab_rects.push((
+            *mode,
+            Rect {
+                x: cursor_x,
+                y: area.y,
+                width,
+                height: 1,
+            },
+        ));
+        cursor_x = cursor_x.saturating_add(width);
+        spans.push(Span::styled(text, style));
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn render_session_tree(frame: &mut Frame, area: Rect, app: &mut App) {
+    let panel = styled_panel("Sessions", true, &app.theme);
+    let inner = inset_rect(panel.inner(area), 1, 1);
+    frame.render_widget(panel, area);
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+    render_sessions_view_tabs(frame, app, sections[0]);
+
+    let tree_area = inset_rect(sections[1], 1, 0);
+    app.layout.card_rects.clear();
+    app.layout.card_kill_rects.clear();
+    app.layout.session_tree_row_rects.clear();
+
+    if app.session_tree_rows.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "No sessions found",
+                Style::default().fg(app.theme.text_secondary),
+            ))),
+            tree_area,
+        );
+        return;
+    }
+
+    if tree_area.width == 0 || tree_area.height == 0 {
+        return;
+    }
+
+    let show_hint = app.session_tree_rows.len() > tree_area.height as usize;
+    let body_height = if show_hint {
+        tree_area.height.saturating_sub(1).max(1)
+    } else {
+        tree_area.height
+    };
+    let visible_count = body_height as usize;
+    let max_window_start = app.session_tree_rows.len().saturating_sub(visible_count);
+
+    if app.session_tree_cursor < app.session_tree_scroll {
+        app.session_tree_scroll = app.session_tree_cursor;
+    }
+    if app.session_tree_cursor >= app.session_tree_scroll + visible_count {
+        app.session_tree_scroll = app
+            .session_tree_cursor
+            .saturating_add(1)
+            .saturating_sub(visible_count);
+    }
+    app.session_tree_scroll = app.session_tree_scroll.min(max_window_start);
+
+    let window_start = app.session_tree_scroll;
+    let window_end = (window_start + visible_count).min(app.session_tree_rows.len());
+
+    let mut lines = Vec::with_capacity(visible_count);
+    for (offset, row) in app.session_tree_rows[window_start..window_end]
+        .iter()
+        .enumerate()
+    {
+        let row_index = window_start + offset;
+        let selected = row_index == app.session_tree_cursor;
+        let active_target = is_tree_row_active_target(app, row);
+        let row_area = Rect {
+            x: tree_area.x,
+            y: tree_area.y + offset as u16,
+            width: tree_area.width,
+            height: 1,
+        };
+        app.layout
+            .session_tree_row_rects
+            .push((row_index, row_area));
+
+        let mut line_style = Style::default().fg(app.theme.text_secondary);
+        if selected {
+            line_style = line_style.bg(app.theme.selected_card_bg);
+        }
+
+        let mut prefix_style = Style::default().fg(app.theme.text_muted);
+        if selected {
+            prefix_style = prefix_style.bg(app.theme.selected_card_bg);
+        }
+        if active_target {
+            line_style = line_style
+                .fg(app.theme.pane_focused_border)
+                .add_modifier(Modifier::BOLD);
+        }
+
+        let prefix = row.prefix();
+        let icon = tree_node_icon(&row.node);
+        let mut spans = vec![Span::styled(prefix, prefix_style)];
+        if !icon.is_empty() {
+            spans.push(Span::styled(icon, line_style));
+            spans.push(Span::styled(" ", line_style));
+        }
+        spans.push(Span::styled(row.label.clone(), line_style));
+        let line = Line::from(spans);
+        lines.push(line);
+    }
+
+    while lines.len() < visible_count {
+        lines.push(Line::from(""));
+    }
+
+    let body_area = Rect {
+        x: tree_area.x,
+        y: tree_area.y,
+        width: tree_area.width,
+        height: body_height,
+    };
+    frame.render_widget(Paragraph::new(lines), body_area);
+
+    if show_hint {
+        let hint = Paragraph::new(format!(
+            "showing {}-{} of {}",
+            window_start + 1,
+            window_end,
+            app.session_tree_rows.len()
+        ))
+        .style(Style::default().fg(app.theme.text_muted));
+        let hint_area = Rect {
+            x: tree_area.x,
+            y: tree_area
+                .y
+                .saturating_add(tree_area.height.saturating_sub(1)),
+            width: tree_area.width,
+            height: 1,
+        };
+        frame.render_widget(hint, hint_area);
+    }
+}
+
+fn tree_node_icon(node: &SessionTreeNode) -> &'static str {
+    match node {
+        SessionTreeNode::SessionRoot { .. } => "",
+        SessionTreeNode::SidebarPane { tab, .. } => match tab {
+            SidebarTab::Console => "$",
+            SidebarTab::Agent => "@",
+            SidebarTab::Chat => "#",
+        },
+        SessionTreeNode::ChatSession { .. } => ">",
+    }
+}
+
+fn is_tree_row_active_target(app: &App, row: &crate::app::SessionTreeRow) -> bool {
+    let selected_index = app.selected_index.min(app.sessions.len().saturating_sub(1));
+    match &row.node {
+        SessionTreeNode::SessionRoot { session_index } => *session_index == selected_index,
+        SessionTreeNode::SidebarPane { session_index, tab } => {
+            *session_index == selected_index && *tab == app.sidebar_tab
+        }
+        SessionTreeNode::ChatSession {
+            session_index,
+            chat_session_id,
+        } => {
+            *session_index == selected_index
+                && app.sidebar_tab == SidebarTab::Chat
+                && app.chat_bridge.active_session_id() == Some(chat_session_id.as_str())
+        }
     }
 }
 
@@ -1072,6 +1289,7 @@ fn footer_actions_for_mode(mode: AppMode) -> Vec<FooterHotkeyAction> {
             FooterHotkeyAction::Attach,
             FooterHotkeyAction::Spawn,
             FooterHotkeyAction::Kill,
+            FooterHotkeyAction::SessionView,
         ],
         AppMode::ActionMenu => vec![
             FooterHotkeyAction::FormSubmit,

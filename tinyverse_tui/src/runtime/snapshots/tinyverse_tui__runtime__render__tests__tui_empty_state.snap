@@ -5,7 +5,8 @@ expression: snapshot
 tinyverse tui  |  0 session(s)
 ╭ Sessions ──────────────────────────────────────────────╮╭ Console ───────────────────────────────╮
 │                                                        ││ 1  Cons   2  Agent   3  Chat           │
-│                                                        ││No session selected                     │
+│  Graph   Tree                                          ││No session selected                     │
+│                                                        ││                                        │
 │                                                        ││                                        │
 │                                                        ││                                        │
 │                                                        ││                                        │
@@ -15,7 +16,6 @@ tinyverse tui  |  0 session(s)
 │   │Run `tinyverse spawn <name>` to create one.     │   ││                                        │
 │   │                                                │   ││                                        │
 │   └────────────────────────────────────────────────┘   ││                                        │
-│                                                        ││                                        │
 │                                                        ││                                        │
 │                                                        ││                                        │
 │                                                        ││                                        │

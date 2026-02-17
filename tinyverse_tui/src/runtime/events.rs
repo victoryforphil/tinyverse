@@ -15,7 +15,7 @@ use tinyverse_lib::{
 
 use crate::app::{
     ACTION_MENU_DANGER_SPLIT_AFTER, App, AppMode, DividerDrag, FooterHotkeyAction, MENU_ACTIONS,
-    MenuAction, PanePreview, SidebarTab,
+    MenuAction, PanePreview, SessionsViewMode, SidebarTab,
 };
 use crate::chat::ChatMessageRole;
 use crate::prefs::{self, TuiPrefs};
@@ -51,6 +51,7 @@ pub(crate) fn refresh_chat_bridge(app: &mut App, force: bool) {
     } else {
         app.chat_bridge.sync_if_due(&mut app.chat);
     }
+    app.sync_tree_cursor_to_active_target();
 }
 
 fn handle_key_event(
@@ -61,27 +62,64 @@ fn handle_key_event(
 ) -> Result<()> {
     match app.mode {
         AppMode::Normal => match key {
-            _ if app.sidebar_tab == SidebarTab::Chat && handle_chat_key_event(key, app, store)? => {
-            }
+            _ if app.sidebar_tab == SidebarTab::Chat
+                && app.sessions_view_mode != SessionsViewMode::Tree
+                && handle_chat_key_event(key, app, store)? => {}
             KeyCode::Esc | KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('h') => {
-                app.select_prev();
+            KeyCode::Up | KeyCode::Char('k') => {
+                if app.sessions_view_mode == SessionsViewMode::Tree {
+                    app.move_tree_cursor_up();
+                    app.activate_tree_cursor();
+                } else {
+                    app.select_prev();
+                }
                 refresh_selected_preview(app);
             }
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('l') => {
-                app.select_next();
+            KeyCode::Down | KeyCode::Char('j') => {
+                if app.sessions_view_mode == SessionsViewMode::Tree {
+                    app.move_tree_cursor_down();
+                    app.activate_tree_cursor();
+                } else {
+                    app.select_next();
+                }
+                refresh_selected_preview(app);
+            }
+            KeyCode::Char('h') => {
+                if app.sessions_view_mode == SessionsViewMode::Tree {
+                    app.move_tree_cursor_up();
+                    app.activate_tree_cursor();
+                } else {
+                    app.select_prev();
+                }
+                refresh_selected_preview(app);
+            }
+            KeyCode::Char('l') => {
+                if app.sessions_view_mode == SessionsViewMode::Tree {
+                    app.move_tree_cursor_down();
+                    app.activate_tree_cursor();
+                } else {
+                    app.select_next();
+                }
                 refresh_selected_preview(app);
             }
             KeyCode::Left => app.prev_sidebar_tab(),
             KeyCode::Right => app.next_sidebar_tab(),
             KeyCode::Char('r') => refresh_sessions_and_preview(app, store)?,
             KeyCode::Char('i') | KeyCode::Tab => app.toggle_inspector(),
+            KeyCode::Char('v') => app.toggle_sessions_view_mode(),
             KeyCode::Char(']') => app.next_sidebar_tab(),
             KeyCode::Char('[') => app.prev_sidebar_tab(),
             KeyCode::Char('1') => app.set_sidebar_tab(SidebarTab::Console),
             KeyCode::Char('2') => app.set_sidebar_tab(SidebarTab::Agent),
             KeyCode::Char('3') => app.set_sidebar_tab(SidebarTab::Chat),
-            KeyCode::Enter => app.open_action_menu(),
+            KeyCode::Enter => {
+                if app.sessions_view_mode == SessionsViewMode::Tree {
+                    app.activate_tree_cursor();
+                    refresh_selected_preview(app);
+                } else {
+                    app.open_action_menu();
+                }
+            }
             KeyCode::Char('a') => attach_selected_session(terminal, app)?,
             KeyCode::Char('s') => {
                 app.reset_spawn_form();
@@ -275,6 +313,19 @@ fn handle_mouse_event(
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(mode) = sessions_view_mode_from_position(x, y, app) {
+                app.set_sessions_view_mode(mode);
+                refresh_selected_preview(app);
+                return Ok(());
+            }
+            if app.sessions_view_mode == SessionsViewMode::Tree
+                && let Some(row_index) = tree_row_index_from_position(x, y, app)
+            {
+                app.set_tree_cursor(row_index);
+                app.activate_tree_cursor();
+                refresh_selected_preview(app);
+                return Ok(());
+            }
             if let Some(index) = card_kill_index_from_position(x, y, app) {
                 app.selected_index = index;
                 refresh_selected_preview(app);
@@ -300,7 +351,13 @@ fn handle_mouse_event(
             }
         }
         MouseEventKind::Down(MouseButton::Right) => {
-            if let Some(index) = card_index_from_position(x, y, app) {
+            if app.sessions_view_mode == SessionsViewMode::Tree
+                && let Some(row_index) = tree_row_index_from_position(x, y, app)
+            {
+                app.set_tree_cursor(row_index);
+                app.activate_tree_cursor();
+                refresh_selected_preview(app);
+            } else if let Some(index) = card_index_from_position(x, y, app) {
                 app.selected_index = index;
                 refresh_selected_preview(app);
             }
@@ -316,8 +373,22 @@ fn handle_mouse_event(
         MouseEventKind::Up(MouseButton::Left) => {
             app.dragging_divider = None;
         }
-        MouseEventKind::ScrollDown => app.select_next(),
-        MouseEventKind::ScrollUp => app.select_prev(),
+        MouseEventKind::ScrollDown => {
+            if app.sessions_view_mode == SessionsViewMode::Tree {
+                app.move_tree_cursor_down();
+                app.activate_tree_cursor();
+            } else {
+                app.select_next();
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            if app.sessions_view_mode == SessionsViewMode::Tree {
+                app.move_tree_cursor_up();
+                app.activate_tree_cursor();
+            } else {
+                app.select_prev();
+            }
+        }
         _ => {}
     }
 
@@ -889,6 +960,20 @@ fn sidebar_tab_from_position(x: u16, y: u16, app: &App) -> Option<SidebarTab> {
         .find_map(|(tab, rect)| rect_contains(*rect, x, y).then_some(*tab))
 }
 
+fn sessions_view_mode_from_position(x: u16, y: u16, app: &App) -> Option<SessionsViewMode> {
+    app.layout
+        .sessions_view_tab_rects
+        .iter()
+        .find_map(|(mode, rect)| rect_contains(*rect, x, y).then_some(*mode))
+}
+
+fn tree_row_index_from_position(x: u16, y: u16, app: &App) -> Option<usize> {
+    app.layout
+        .session_tree_row_rects
+        .iter()
+        .find_map(|(row_index, rect)| rect_contains(*rect, x, y).then_some(*row_index))
+}
+
 fn execute_menu_action(
     action: MenuAction,
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -1225,6 +1310,7 @@ fn execute_footer_action(
                 app.status_message = String::from("No session selected");
             }
         }
+        FooterHotkeyAction::SessionView => app.toggle_sessions_view_mode(),
         FooterHotkeyAction::FormNextField => {
             if app.mode == AppMode::SpawnInput {
                 app.spawn_form.next_field();

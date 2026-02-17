@@ -1,22 +1,21 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 1184
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
 ╭ Sessions ──────────────────────────────────────────────────────────╮╭ Console ───────────────────────────────────────╮
 │                                                                    ││ 1  Cons   2  Agent   3  Chat                   │
-│  ┌ tinyverse_alpha ────────────────────────────────────────── X ┐  ││Loading console preview...                      │
+│  Graph   Tree                                                      ││Loading console preview...                      │
+│  ┌ tinyverse_alpha ────────────────────────────────────────── X ┐  ││                                                │
 │  │  active   opencode                                           │  ││                                                │
 │  │  openai/gpt-5.3-codex   0 msgs                               │  ││                                                │
 │  │                                                              │  ││                                                │
 │  │                                                              │  ││                                                │
 │  │                                                              │  ││                                                │
 │  │                                                              │  ││                                                │
-│  │                                                              │  ││                                                │
 │  │                                  ╭ Actions ─────────────────────────────────╮                                     │
-│  └ Jan 01 00:00 · unknown ──────────│ ▸  s  Spawn new session                  │                                     │
-│                                     │ r  Refresh sessions                      │                                     │
+│  │                                  │ ▸  s  Spawn new session                  │                                     │
+│  └ Jan 01 00:00 · unknown ──────────│ r  Refresh sessions                      │                                     │
 │                                     │ i  Toggle inspector                      │                                     │
 │                                     │ a  Attach selected session               │                                     │
 │                                     │ c  Send command to console pane          │                                     │
