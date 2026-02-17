@@ -5,8 +5,8 @@ use serde::Serialize;
 use tinyverse_lib::tmux::{ListSessionsOptions, TmuxClient};
 use tinyverse_lib::{SessionStore, StoredSession};
 use tinyverse_ui::{
-    default_stdout_context, ActionLine, GuidanceLine, Panel, StripeMode, StyledTable,
-    SummaryFooter, Tone,
+    ActionLine, GuidanceLine, Panel, StripeMode, StyledTable, SummaryFooter, Tone,
+    default_stdout_context,
 };
 
 const EMPTY_MESSAGE: &str = "No TinyVerse sessions found in database.";
@@ -143,10 +143,9 @@ fn format_text_report(report: &ListReport) -> String {
 fn format_table_report(report: &ListReport) -> String {
     let context = default_stdout_context();
     let mut table_panel_lines = Vec::new();
-    let mut outer_footer_lines =
-        vec![
-            SummaryFooter::new(format!("{} session(s)", report.returned_sessions)).render(&context),
-        ];
+    let mut outer_footer_lines = vec![
+        SummaryFooter::new(format!("{} session(s)", report.returned_sessions)).render(&context),
+    ];
 
     if report.sessions.is_empty() {
         if report.source_of_truth == "tmux" {
@@ -249,7 +248,7 @@ fn append_unmanaged_tmux_sessions(
 
 #[cfg(test)]
 mod tests {
-    use super::{format_table_report, format_text_report, ListItem, ListReport};
+    use super::{ListItem, ListReport, format_table_report, format_text_report};
 
     #[test]
     fn empty_report_has_clear_message() {

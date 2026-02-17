@@ -1,6 +1,6 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use clap::Args;
-use tinyverse_ui::{default_stdout_context, ActionLine, LabeledField, Panel, Tone};
+use tinyverse_ui::{ActionLine, LabeledField, Panel, Tone, default_stdout_context};
 
 use super::store;
 

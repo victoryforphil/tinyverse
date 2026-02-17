@@ -1,15 +1,15 @@
 use std::io::IsTerminal;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use log::info;
 use tinyverse_lib::tmux::{ListSessionsOptions, SessionTarget, TmuxClient};
 use tinyverse_lib::{
-    resolve_required_session_key, select_required_arg, ArgSelectOption, RequiredArgSelectConfig,
-    RequiredSessionSelectConfig, SessionStore,
+    ArgSelectOption, RequiredArgSelectConfig, RequiredSessionSelectConfig, SessionStore,
+    resolve_required_session_key, select_required_arg,
 };
 use tinyverse_ui::{
-    default_stdout_context, ActionLine, ErrorBlock, GuidanceLine, LabeledField, Panel,
-    SummaryFooter, Tone,
+    ActionLine, ErrorBlock, GuidanceLine, LabeledField, Panel, SummaryFooter, Tone,
+    default_stdout_context,
 };
 
 use super::args::KillArgs;
