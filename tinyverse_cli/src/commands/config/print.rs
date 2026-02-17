@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::{Args, ValueEnum};
 use serde::Serialize;
 use tinyverse_ui::{
-    ActionLine, LabeledField, Panel, StripeMode, StyledTable, SummaryFooter, Tone,
-    default_stdout_context,
+    default_stdout_context, ActionLine, LabeledField, Panel, StripeMode, StyledTable,
+    SummaryFooter, Tone,
 };
 
 use crate::commands::output::OutputFormat;
@@ -241,9 +241,10 @@ fn render_raw_output(config: &store::TinyverseConfig, format: OutputFormat) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigPrintReport, render_full_output, render_raw_output};
+    use super::{render_full_output, render_raw_output, ConfigPrintReport};
     use crate::commands::config::store::{
-        GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig, WorkspaceConfig,
+        GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig, TuiConfig,
+        WorkspaceConfig,
     };
     use crate::commands::output::OutputFormat;
 
@@ -267,6 +268,7 @@ mod tests {
                     default_model: None,
                 },
                 tmux: TmuxConfig::default(),
+                tui: TuiConfig::default(),
             },
         }
     }

@@ -19,6 +19,8 @@ pub struct TinyverseConfig {
     pub spawn: SpawnConfig,
     #[serde(default)]
     pub tmux: TmuxConfig,
+    #[serde(default)]
+    pub tui: TuiConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,6 +77,12 @@ pub struct TmuxLayoutConfig {
     pub secondary_percent: u8,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TuiConfig {
+    #[serde(default = "default_tui_refresh_hz")]
+    pub refresh_hz: u16,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TmuxLayoutDirection {
@@ -118,6 +126,14 @@ impl Default for SpawnConfig {
     }
 }
 
+impl Default for TuiConfig {
+    fn default() -> Self {
+        Self {
+            refresh_hz: default_tui_refresh_hz(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LoadedConfig {
     pub config: TinyverseConfig,
@@ -147,6 +163,7 @@ struct PartialTinyverseConfig {
     git: Option<PartialGitConfig>,
     spawn: Option<PartialSpawnConfig>,
     tmux: Option<PartialTmuxConfig>,
+    tui: Option<PartialTuiConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -182,6 +199,11 @@ struct PartialTmuxLayoutConfig {
     direction: Option<TmuxLayoutDirection>,
     primary: Option<TmuxLayoutPrimary>,
     secondary_percent: Option<u8>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PartialTuiConfig {
+    refresh_hz: Option<u16>,
 }
 
 pub fn load() -> Result<TinyverseConfig> {
@@ -287,6 +309,7 @@ fn apply_partial(target: &mut TinyverseConfig, partial: PartialTinyverseConfig) 
         git,
         spawn,
         tmux,
+        tui,
     } = partial;
 
     if let Some(shell) = shell
@@ -333,6 +356,13 @@ fn apply_partial(target: &mut TinyverseConfig, partial: PartialTinyverseConfig) 
             }
         }
     }
+
+    if let Some(tui) = tui
+        && let Some(refresh_hz) = tui.refresh_hz
+        && refresh_hz > 0
+    {
+        target.tui.refresh_hz = refresh_hz;
+    }
 }
 
 fn default_branch_prefix() -> String {
@@ -361,6 +391,10 @@ fn default_tmux_layout_direction() -> TmuxLayoutDirection {
 
 fn default_tmux_layout_primary() -> TmuxLayoutPrimary {
     TmuxLayoutPrimary::Agent
+}
+
+fn default_tui_refresh_hz() -> u16 {
+    1
 }
 
 #[cfg(test)]
@@ -399,6 +433,7 @@ mod tests {
                 default_model: Some("gpt-5".to_owned()),
             },
             tmux: super::TmuxConfig::default(),
+            tui: super::TuiConfig::default(),
         };
 
         let written = save_to_path(&config, path.clone()).expect("save should succeed");

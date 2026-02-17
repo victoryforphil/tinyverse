@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use log::info;
 use tinyverse_lib::tmux::{PanelRole, SpawnSessionOptions, SplitDirection, TmuxClient};
-use tinyverse_lib::{CreateSessionInput, SessionStore, resolve_session_name};
+use tinyverse_lib::{resolve_session_name, CreateSessionInput, SessionStore};
 use tinyverse_ui::{
-    ActionLine, DetailSection, GuidanceLine, LabeledField, Panel, Tone, default_stdout_context,
+    default_stdout_context, ActionLine, DetailSection, GuidanceLine, LabeledField, Panel, Tone,
 };
 
 use super::args::SpawnArgs;
@@ -11,7 +11,7 @@ use crate::commands::config::store;
 use crate::commands::config::store::{TmuxLayoutDirection, TmuxLayoutPrimary};
 use crate::commands::output::display_session_name;
 use crate::prompts::{resolve_launch_prompt, resolve_user_prompt};
-use crate::providers::{LaunchContext, find_by_key};
+use crate::providers::{find_by_key, LaunchContext};
 
 pub fn execute(args: SpawnArgs) -> Result<()> {
     let config = store::load()?;
@@ -211,7 +211,8 @@ mod tests {
     use super::SpawnArgs;
     use super::{resolve_agent_key, resolve_working_dir, validate_tmux_config};
     use crate::commands::config::store::{
-        GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig, WorkspaceConfig,
+        GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig, TuiConfig,
+        WorkspaceConfig,
     };
     use crate::prompts::resolve_user_prompt;
 
@@ -241,6 +242,7 @@ mod tests {
                 default_model: None,
             },
             tmux: TmuxConfig::default(),
+            tui: TuiConfig::default(),
         };
 
         assert_eq!(resolve_agent_key(&args, &config), "opencode");
@@ -256,6 +258,7 @@ mod tests {
             git: GitConfig::default(),
             spawn: SpawnConfig::default(),
             tmux: TmuxConfig::default(),
+            tui: TuiConfig::default(),
         };
 
         let resolved = resolve_working_dir(&config).expect("workspace resolution should succeed");

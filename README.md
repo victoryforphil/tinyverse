@@ -88,6 +88,7 @@
   - Source of truth is the local tinyverse SQLite session DB.
   - Reconciles DB sessions against tmux before reads (debounced/rate-limited).
   - `--all` includes unmanaged tmux sessions in addition to DB sessions.
+  - `--tmux` bypasses TinyVerse storage and lists tmux sessions directly.
   - `--format={table|text|json|toml|yaml}` (default: `table`)
 - `spawn` // Create a new tinyverse session (console + agent panes).
   - Default pane layout: `agent` on left, `console` on right.
@@ -122,6 +123,7 @@
     - `tmux.layout.direction` (`horizontal|vertical`)
     - `tmux.layout.primary` (`agent|console`)
     - `tmux.layout.secondary_percent` (`1-99`)
+    - `tui.refresh_hz` (integer; updates per second)
 - `attach <session>` // Attach to an existing session by key or name.
   - Session lookup first tries an exact match.
   - If exact match is not found, tinyverse also tries `tinyverse_<session>`.
@@ -130,6 +132,8 @@
 - `detach` // Detach current tmux client without closing the session.
 - `kill <session>` // Kill session by key or name.
   - If `<session>` is omitted in an interactive terminal, tinyverse opens a TUI selector.
+  - `--tmux` bypasses TinyVerse storage and targets tmux sessions directly.
+  - `--tmux --all` kills all tmux sessions.
 - `view` // Capture pane output.
   - `--session={key_or_name}` (optional inside tmux, required outside tmux)
   - `--panel={console|agent|%pane_id}`
@@ -173,6 +177,9 @@ cargo run -p tinyverse_cli -- config set tmux.layout.direction horizontal
 cargo run -p tinyverse_cli -- config set tmux.layout.primary agent
 cargo run -p tinyverse_cli -- config set tmux.layout.secondary_percent 35
 
+# Set TUI refresh rate (2 Hz = 500ms)
+cargo run -p tinyverse_cli -- config set tui.refresh_hz 2
+
 # Check effective config and export as TOML
 cargo run -p tinyverse_cli -- config print
 cargo run -p tinyverse_cli -- config export
@@ -190,8 +197,11 @@ cargo run -p tinyverse_cli -- spawn --key my-session
 # List tinyverse sessions only (default)
 cargo run -p tinyverse_cli -- list
 
-# List all tmux sessions
+# List TinyVerse + unmanaged tmux sessions
 cargo run -p tinyverse_cli -- list --all
+
+# List tmux sessions directly (bypass TinyVerse DB)
+cargo run -p tinyverse_cli -- list --tmux
 
 # Override tinyverse home path for this invocation
 cargo run -p tinyverse_cli -- --tinyverse-dir-home ./.tinyverse list
@@ -239,6 +249,12 @@ cargo run -p tinyverse_cli -- kill tinyverse_123
 
 # Kill and choose from interactive TUI selector
 cargo run -p tinyverse_cli -- kill
+
+# Kill a tmux session directly (bypass TinyVerse DB)
+cargo run -p tinyverse_cli -- kill --tmux my-tmux-session
+
+# Kill all tmux sessions directly
+cargo run -p tinyverse_cli -- kill --tmux --all
 ```
 
 ### Example outputs
