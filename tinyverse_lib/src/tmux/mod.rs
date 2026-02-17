@@ -211,22 +211,25 @@ impl TmuxClient {
             return Ok(());
         }
 
-        let mut args = vec![
-            "send-keys".to_owned(),
-            "-t".to_owned(),
-            pane_target.to_owned(),
-        ];
-
         if !command.is_empty() {
-            args.push("-l".to_owned());
-            args.push(command.to_owned());
+            self.run_tmux(vec![
+                "send-keys".to_owned(),
+                "-t".to_owned(),
+                pane_target.to_owned(),
+                "-l".to_owned(),
+                command.to_owned(),
+            ])?;
         }
 
         if press_enter {
-            args.push("Enter".to_owned());
+            self.run_tmux(vec![
+                "send-keys".to_owned(),
+                "-t".to_owned(),
+                pane_target.to_owned(),
+                "Enter".to_owned(),
+            ])?;
         }
 
-        self.run_tmux(args)?;
         Ok(())
     }
 

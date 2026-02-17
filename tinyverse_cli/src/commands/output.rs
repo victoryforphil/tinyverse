@@ -13,6 +13,8 @@ pub enum OutputFormat {
     Table,
     Text,
     Json,
+    Toml,
+    Yaml,
 }
 
 pub fn render_output<T, FT, FTab>(
@@ -30,6 +32,8 @@ where
         OutputFormat::Table => render_table(value),
         OutputFormat::Text => render_text(value),
         OutputFormat::Json => serde_json::to_string_pretty(value)?,
+        OutputFormat::Toml => toml::to_string_pretty(value)?,
+        OutputFormat::Yaml => serde_yaml::to_string(value)?,
     };
 
     Ok(rendered)
@@ -39,7 +43,7 @@ where
 mod tests {
     use serde::Serialize;
 
-    use super::{OutputFormat, display_session_name, render_output};
+    use super::{display_session_name, render_output, OutputFormat};
 
     #[derive(Serialize)]
     struct Example {
@@ -94,5 +98,33 @@ mod tests {
         .expect("table rendering should succeed");
 
         assert_eq!(output, "table");
+    }
+
+    #[test]
+    fn renders_toml_output() {
+        let value = Example { label: "ok" };
+        let output = render_output(
+            &value,
+            OutputFormat::Toml,
+            |_| "ignored".to_owned(),
+            |_| "ignored".to_owned(),
+        )
+        .expect("toml rendering should succeed");
+
+        assert!(output.contains("label = \"ok\""));
+    }
+
+    #[test]
+    fn renders_yaml_output() {
+        let value = Example { label: "ok" };
+        let output = render_output(
+            &value,
+            OutputFormat::Yaml,
+            |_| "ignored".to_owned(),
+            |_| "ignored".to_owned(),
+        )
+        .expect("yaml rendering should succeed");
+
+        assert!(output.contains("label: ok"));
     }
 }

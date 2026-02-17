@@ -3,6 +3,7 @@ use clap::Parser;
 
 mod commands;
 mod logging;
+mod prompts;
 mod providers;
 mod root;
 mod run;

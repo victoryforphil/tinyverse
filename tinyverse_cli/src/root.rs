@@ -5,8 +5,9 @@ use tinyverse_lib::TINYVERSE_DIR_HOME_ENV;
 
 use crate::commands::{
     attach::args::AttachArgs, config::command::ConfigCommands, debug::args::DebugCommands,
-    detach::args::DetachArgs, kill::args::KillArgs, list::args::ListArgs, send::args::SendArgs,
-    spawn::args::SpawnArgs, view::args::ViewArgs,
+    detach::args::DetachArgs, kill::args::KillArgs, list::args::ListArgs,
+    prompt::args::PromptCommands, send::args::SendArgs, spawn::args::SpawnArgs, tui::args::TuiArgs,
+    view::args::ViewArgs,
 };
 
 #[derive(Debug, Parser)]
@@ -36,6 +37,11 @@ pub enum Commands {
     },
     /// Show tinyverse data directory
     Path,
+    /// Prompt template utilities
+    Prompt {
+        #[command(subcommand)]
+        command: PromptCommands,
+    },
     /// List known TinyVerse sessions
     List(ListArgs),
     /// Spawn a new TinyVerse session
@@ -50,6 +56,8 @@ pub enum Commands {
     View(ViewArgs),
     /// Send command to a session panel
     Send(SendArgs),
+    /// Launch the interactive TUI dashboard
+    Tui(TuiArgs),
     /// Debugging utilities
     Debug {
         #[command(subcommand)]

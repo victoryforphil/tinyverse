@@ -1,21 +1,22 @@
 use anyhow::{Context, Result};
 use log::info;
 use tinyverse_lib::tmux::{SpawnSessionOptions, TmuxClient};
-use tinyverse_lib::{CreateSessionInput, SessionStore, resolve_session_name};
+use tinyverse_lib::{resolve_session_name, CreateSessionInput, SessionStore};
 use tinyverse_ui::{
-    ActionLine, DetailSection, GuidanceLine, LabeledField, Panel, Tone, default_stdout_context,
+    default_stdout_context, ActionLine, DetailSection, GuidanceLine, LabeledField, Panel, Tone,
 };
 
 use super::args::SpawnArgs;
 use crate::commands::config::store;
 use crate::commands::output::display_session_name;
-use crate::providers::{LaunchContext, find_by_key};
+use crate::prompts::{resolve_launch_prompt, resolve_user_prompt};
+use crate::providers::{find_by_key, LaunchContext};
 
 pub fn execute(args: SpawnArgs) -> Result<()> {
     let config = store::load()?;
     let mut store = SessionStore::open_default()?;
     let session_name = resolve_session_name(args.key.as_deref(), &mut store)?;
-    let prompt = resolve_prompt(args.prompt.as_deref())?;
+    let user_prompt = resolve_user_prompt(args.prompt.as_deref())?;
     let agent_key = resolve_agent_key(&args, &config);
     let provider = find_by_key(agent_key.as_str())
         .with_context(|| format!("unknown provider `{}`", agent_key))?;
@@ -23,8 +24,9 @@ pub fn execute(args: SpawnArgs) -> Result<()> {
         .model
         .as_deref()
         .or(config.spawn.default_model.as_deref());
+    let launch_prompt = resolve_launch_prompt(agent_key.as_str(), user_prompt.as_deref());
     let agent_command = provider.build_launch_command(LaunchContext {
-        prompt: prompt.as_deref(),
+        prompt: launch_prompt.as_deref(),
         model,
         args: args.agent_args.as_deref(),
     });
@@ -117,26 +119,6 @@ fn print_spawn_summary(
     println!("{header}\n\n{body}");
 }
 
-fn resolve_prompt(prompt_arg: Option<&str>) -> Result<Option<String>> {
-    let Some(prompt_arg) = prompt_arg else {
-        return Ok(None);
-    };
-
-    let trimmed = prompt_arg.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-
-    let path = std::path::Path::new(trimmed);
-    if path.is_file() {
-        let contents = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read prompt file `{trimmed}`"))?;
-        return Ok(Some(contents.trim().to_owned()));
-    }
-
-    Ok(Some(trimmed.to_owned()))
-}
-
 fn resolve_clean_shell(args: &SpawnArgs, config: &store::TinyverseConfig) -> bool {
     if args.clean_shell {
         return true;
@@ -200,14 +182,15 @@ fn expand_config_path(value: &str, cwd: &std::path::Path) -> std::path::PathBuf 
 #[cfg(test)]
 mod tests {
     use super::SpawnArgs;
-    use super::{resolve_agent_key, resolve_prompt, resolve_working_dir};
+    use super::{resolve_agent_key, resolve_working_dir};
     use crate::commands::config::store::{
         GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, WorkspaceConfig,
     };
+    use crate::prompts::resolve_user_prompt;
 
     #[test]
     fn treats_empty_prompt_as_none() {
-        let resolved = resolve_prompt(Some("   ")).expect("prompt resolution should succeed");
+        let resolved = resolve_user_prompt(Some("   ")).expect("prompt resolution should succeed");
         assert!(resolved.is_none());
     }
 
