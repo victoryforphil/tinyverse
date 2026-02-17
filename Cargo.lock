@@ -407,6 +407,7 @@ dependencies = [
  "log",
  "pretty_env_logger",
  "serde",
+ "tinyverse_lib",
  "toml",
 ]
 

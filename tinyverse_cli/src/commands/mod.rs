@@ -5,4 +5,5 @@ pub mod path;
 pub mod providers;
 pub mod send;
 pub mod spawn;
+pub mod tmux_helpers;
 pub mod view;
