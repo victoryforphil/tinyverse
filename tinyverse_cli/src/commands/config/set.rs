@@ -56,8 +56,20 @@ pub fn execute(args: ConfigSetArgs) -> Result<()> {
         "tui.theme" => {
             config.tui.theme = parse_optional_string(value);
         }
+        "opencode.server.enabled" => {
+            config.opencode.server.enabled = parse_bool(value)?;
+        }
+        "opencode.server.hostname" => {
+            config.opencode.server.hostname = parse_required_string(value, key)?;
+        }
+        "opencode.server.port" => {
+            config.opencode.server.port = parse_u16(value, key)?;
+        }
+        "opencode.server.tmux_session_name" => {
+            config.opencode.server.tmux_session_name = parse_required_string(value, key)?;
+        }
         _ => bail!(
-            "unknown config key `{key}` (supported: shell.clean, workspace.default_dir, git.branch_prefix, spawn.default_agent, spawn.default_model, tmux.initial_window_width, tmux.initial_window_height, tmux.layout.direction, tmux.layout.primary, tmux.layout.secondary_percent, tui.refresh_hz, tui.theme)"
+            "unknown config key `{key}` (supported: shell.clean, workspace.default_dir, git.branch_prefix, spawn.default_agent, spawn.default_model, tmux.initial_window_width, tmux.initial_window_height, tmux.layout.direction, tmux.layout.primary, tmux.layout.secondary_percent, tui.refresh_hz, tui.theme, opencode.server.enabled, opencode.server.hostname, opencode.server.port, opencode.server.tmux_session_name)"
         ),
     }
 

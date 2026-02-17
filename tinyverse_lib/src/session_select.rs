@@ -1,8 +1,8 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use tinyverse_ui::format_display_name;
 
 use crate::{
-    ArgSelectOption, RequiredArgSelectConfig, SessionStore, StoredSession, select_required_arg,
+    select_required_arg, ArgSelectOption, RequiredArgSelectConfig, SessionStore, StoredSession,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +91,8 @@ mod tests {
             tmux_session_id: None,
             console_pane_id: None,
             agent_pane_id: None,
+            agent_base_url: None,
+            agent_session_id: None,
             created_at: epoch,
             last_message_at: None,
             updated_at: epoch,

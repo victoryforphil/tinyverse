@@ -32,7 +32,7 @@ await runCommandSteps([
       "diesel_cli",
       "--no-default-features",
       "--features",
-      "sqlite",
+      "sqlite-bundled",
     ],
     cwd: repoRoot,
   },

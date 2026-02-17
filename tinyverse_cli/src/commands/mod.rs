@@ -5,6 +5,7 @@ pub mod detach;
 pub mod gha_babysit;
 pub mod kill;
 pub mod list;
+pub mod opencode_server;
 pub mod output;
 pub mod path;
 pub mod prompt;

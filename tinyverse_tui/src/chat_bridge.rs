@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use crate::chat::{ChatMessage, ChatMessagePart, ChatMessageRole, ChatState};
 use crate::logger::log_line;
 
-const DEFAULT_BASE_URL: &str = "http://127.0.0.1:4096";
+const DEFAULT_BASE_URL: &str = "http://127.0.0.1:4150";
 const DEFAULT_SYNC_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

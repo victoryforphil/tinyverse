@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use tinyverse_lib::resolve_tinyverse_paths;
 use tinyverse_ui::{ActionLine, DefaultTheme, ErrorBlock, Panel, RenderContext, RenderMode, Tone};
 use tracing::field::{Field, Visit};
@@ -14,12 +14,36 @@ use tracing_subscriber::fmt::{FmtContext, FormatEvent, FormatFields};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 use tracing_subscriber::{EnvFilter, Registry};
 
 const RUST_INFO_ENV: &str = "RUST_INFO";
 const NO_COLOR_ENV: &str = "NO_COLOR";
 const DEFAULT_LOG_LEVEL: &str = "INFO";
+const TUI_DEFAULT_LOG_LEVEL: &str = "DEBUG";
 const LOGS_DIR_NAME: &str = "logs";
+
+#[derive(Debug, Clone, Copy)]
+pub struct InitOptions {
+    pub stdout_enabled: bool,
+    pub default_level: &'static str,
+}
+
+impl InitOptions {
+    pub fn cli_default() -> Self {
+        Self {
+            stdout_enabled: true,
+            default_level: DEFAULT_LOG_LEVEL,
+        }
+    }
+
+    pub fn tui_mode() -> Self {
+        Self {
+            stdout_enabled: false,
+            default_level: TUI_DEFAULT_LOG_LEVEL,
+        }
+    }
+}
 
 pub struct FancyFormat {
     use_ansi: bool,
@@ -125,9 +149,9 @@ where
     }
 }
 
-pub fn init(tinyverse_dir_home_override: Option<&Path>) -> Result<()> {
-    let filter_value =
-        std::env::var(RUST_INFO_ENV).unwrap_or_else(|_| DEFAULT_LOG_LEVEL.to_owned());
+pub fn init(tinyverse_dir_home_override: Option<&Path>, options: InitOptions) -> Result<()> {
+    let filter_value = std::env::var(RUST_INFO_ENV)
+        .unwrap_or_else(|_| default_filter_for_options(options).to_owned());
     let env_filter = EnvFilter::try_new(filter_value)
         .or_else(|_| EnvFilter::try_new(DEFAULT_LOG_LEVEL))
         .context("failed to build env filter")?;
@@ -146,17 +170,24 @@ pub fn init(tinyverse_dir_home_override: Option<&Path>) -> Result<()> {
         .with_context(|| format!("failed to open log file `{}`", log_file_path.display()))?;
     let log_file = Arc::new(Mutex::new(log_file));
 
-    let use_ansi = std::io::stdout().is_terminal() && std::env::var_os(NO_COLOR_ENV).is_none();
+    let use_ansi = options.stdout_enabled
+        && std::io::stdout().is_terminal()
+        && std::env::var_os(NO_COLOR_ENV).is_none();
     let fmt_layer = tracing_subscriber::fmt::layer()
         .without_time()
         .with_target(false)
         .with_ansi(use_ansi)
-        .event_format(FancyFormat::new(use_ansi));
+        .event_format(FancyFormat::new(use_ansi))
+        .with_filter(tracing_subscriber::filter::filter_fn(move |_| {
+            options.stdout_enabled
+        }));
     let file_layer = tracing_subscriber::fmt::layer()
-        .without_time()
-        .with_target(false)
+        .with_target(true)
+        .with_file(true)
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_thread_names(true)
         .with_ansi(false)
-        .event_format(FancyFormat::new(false))
         .with_writer({
             let log_file = Arc::clone(&log_file);
             move || SharedFileWriter::new(Arc::clone(&log_file))
@@ -170,6 +201,14 @@ pub fn init(tinyverse_dir_home_override: Option<&Path>) -> Result<()> {
         .map_err(|error| anyhow!("failed to initialize tracing subscriber: {error}"))?;
 
     Ok(())
+}
+
+fn default_filter_for_options(options: InitOptions) -> &'static str {
+    if !options.stdout_enabled && options.default_level.eq_ignore_ascii_case("DEBUG") {
+        return "warn,tinyverse_cli=debug,tinyverse_lib=debug,tinyverse_tui=debug,tinyverse_ui=debug,tinyverse_tui_components=debug";
+    }
+
+    options.default_level
 }
 
 fn unix_timestamp_millis() -> u128 {

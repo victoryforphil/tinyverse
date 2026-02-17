@@ -208,6 +208,22 @@ fn render_full_table_output(report: &ConfigPrintReport) -> String {
                 .as_deref()
                 .unwrap_or("<unset>")
                 .to_owned(),
+        ])
+        .with_row(vec![
+            "opencode.server.enabled".to_owned(),
+            report.config.opencode.server.enabled.to_string(),
+        ])
+        .with_row(vec![
+            "opencode.server.hostname".to_owned(),
+            report.config.opencode.server.hostname.clone(),
+        ])
+        .with_row(vec![
+            "opencode.server.port".to_owned(),
+            report.config.opencode.server.port.to_string(),
+        ])
+        .with_row(vec![
+            "opencode.server.tmux_session_name".to_owned(),
+            report.config.opencode.server.tmux_session_name.clone(),
         ]);
 
     Panel::new(
@@ -224,7 +240,7 @@ fn render_full_table_output(report: &ConfigPrintReport) -> String {
                 .with_tone(Tone::Info)
                 .render(&context),
             String::new(),
-            SummaryFooter::new("12 config key(s)").render(&context),
+            SummaryFooter::new("16 config key(s)").render(&context),
         ]
         .join("\n"),
     )
@@ -257,8 +273,8 @@ fn render_raw_output(config: &store::TinyverseConfig, format: OutputFormat) -> R
 mod tests {
     use super::{render_full_output, render_raw_output, ConfigPrintReport};
     use crate::commands::config::store::{
-        GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig, TuiConfig,
-        WorkspaceConfig,
+        GitConfig, OpencodeConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig,
+        TuiConfig, WorkspaceConfig,
     };
     use crate::commands::output::OutputFormat;
 
@@ -283,6 +299,7 @@ mod tests {
                 },
                 tmux: TmuxConfig::default(),
                 tui: TuiConfig::default(),
+                opencode: OpencodeConfig::default(),
             },
         }
     }

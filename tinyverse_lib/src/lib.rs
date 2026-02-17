@@ -17,7 +17,8 @@ pub use session_name::resolve_session_name;
 pub use session_select::{RequiredSessionSelectConfig, resolve_required_session_key};
 pub use session_store::{
     CreateSessionInput, DEFAULT_RECONCILE_MIN_INTERVAL, ResetDbReport, STATUS_ACTIVE, SessionStore,
-    StoredSession, reset_db_with_backup, sanitize_session_key,
+    StoredAgentService, StoredSession, UpsertAgentServiceInput, reset_db_with_backup,
+    sanitize_session_key,
 };
 pub use spawn_layout::{TmuxSpawnLayout, load_tmux_spawn_layout};
 pub use terminal_text::strip_ansi_and_controls;

@@ -171,6 +171,13 @@ fn preferred_chat_session_id_for_selected_session(app: &App) -> Option<String> {
 
 fn preferred_chat_base_url_for_selected_session(app: &App) -> Option<String> {
     let session = app.selected_session()?;
+    if let Some(base_url) = session.agent_base_url.as_deref() {
+        let trimmed = base_url.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
+        }
+    }
+
     let pane_id = session.agent_pane_id.as_deref()?.trim();
     if pane_id.is_empty() {
         return None;
@@ -189,8 +196,8 @@ fn preferred_chat_base_url_for_selected_session(app: &App) -> Option<String> {
     });
 
     for (_pid, command) in commands {
-        if let Some(port) = extract_opencode_port_from_command(&command) {
-            return Some(format!("http://127.0.0.1:{port}"));
+        if let Some(base_url) = extract_opencode_base_url_from_command(&command) {
+            return Some(base_url);
         }
     }
 
@@ -198,6 +205,13 @@ fn preferred_chat_base_url_for_selected_session(app: &App) -> Option<String> {
 }
 
 fn resolve_chat_session_id_from_agent_process(session: &StoredSession) -> Option<String> {
+    if let Some(session_id) = session.agent_session_id.as_deref() {
+        let trimmed = session_id.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
+        }
+    }
+
     let pane_id = session.agent_pane_id.as_deref()?.trim();
     if pane_id.is_empty() {
         return None;
@@ -300,7 +314,7 @@ fn extract_any_chat_session_env(command: &str) -> Option<String> {
         .or_else(|| extract_session_id_from_command_args(command))
 }
 
-fn extract_opencode_port_from_command(command: &str) -> Option<u16> {
+fn extract_opencode_base_url_from_command(command: &str) -> Option<String> {
     let tokens = command.split_whitespace().collect::<Vec<_>>();
     let is_opencode_command = tokens
         .iter()
@@ -309,20 +323,56 @@ fn extract_opencode_port_from_command(command: &str) -> Option<u16> {
         return None;
     }
 
+    if let Some(url) = extract_attach_url_from_tokens(&tokens) {
+        return Some(url);
+    }
+
+    let hostname =
+        extract_arg_value_from_tokens(&tokens, "--hostname", "-h").unwrap_or_else(|| {
+            String::from("127.0.0.1")
+        });
+
+    let port = extract_arg_value_from_tokens(&tokens, "--port", "-p")
+        .and_then(|value| value.trim().parse::<u16>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(4150);
+
+    Some(format!("http://{hostname}:{port}"))
+}
+
+fn extract_attach_url_from_tokens(tokens: &[&str]) -> Option<String> {
     for (index, token) in tokens.iter().enumerate() {
-        if let Some(value) = token.strip_prefix("--port=")
-            && let Ok(port) = value.trim().parse::<u16>()
-            && port > 0
+        if *token == "attach"
+            && let Some(value) = tokens.get(index + 1)
+            && !value.starts_with('-')
+            && !value.trim().is_empty()
         {
-            return Some(port);
+            return Some(value.trim().trim_end_matches('/').to_owned());
+        }
+    }
+
+    None
+}
+
+fn extract_arg_value_from_tokens(tokens: &[&str], long_flag: &str, short_flag: &str) -> Option<String> {
+    for (index, token) in tokens.iter().enumerate() {
+        if let Some(value) = token.strip_prefix(&format!("{long_flag}="))
+            && !value.trim().is_empty()
+        {
+            return Some(value.trim().to_owned());
+        }
+        if let Some(value) = token.strip_prefix(&format!("{short_flag}="))
+            && !value.trim().is_empty()
+        {
+            return Some(value.trim().to_owned());
         }
 
-        if *token == "--port"
+        if (*token == long_flag || *token == short_flag)
             && let Some(value) = tokens.get(index + 1)
-            && let Ok(port) = value.trim().parse::<u16>()
-            && port > 0
+            && !value.starts_with('-')
+            && !value.trim().is_empty()
         {
-            return Some(port);
+            return Some(value.trim().to_owned());
         }
     }
 
@@ -1406,6 +1456,9 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
     let mut attach_url: Option<String> = None;
     let mut attach_session_id: Option<String> = None;
     if agent_type.eq_ignore_ascii_case("opencode") {
+        if let Ok(Some(service)) = store.find_agent_service("opencode") {
+            app.chat_bridge.set_base_url(&service.base_url);
+        }
         let title = format!("tinyverse: {session_name}");
         match app.chat_bridge.create_session_for_spawn(&mut app.chat, &title) {
             Ok(session_id) => {
@@ -1427,14 +1480,17 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
     spawn_options.primary_role = tmux_layout.primary_role;
     spawn_options.secondary_size_percent = Some(tmux_layout.secondary_size_percent);
     let resolved_prompt = resolve_prompt_input(&prompt);
-    spawn_options.agent_command = Some(build_agent_command(
+    let agent_command = build_agent_command(
         &tmux_session_name,
         &agent_type,
         &model,
         &resolved_prompt,
         attach_url.as_deref(),
         attach_session_id.as_deref(),
-    ));
+    );
+    let inferred_base_url = extract_opencode_base_url_from_command(&agent_command);
+    let inferred_session_id = extract_session_id_from_command_args(&agent_command);
+    spawn_options.agent_command = Some(agent_command);
     let spawn_result = TmuxClient::new().spawn_session(spawn_options);
 
     let spawned = match spawn_result {
@@ -1453,6 +1509,8 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
         tmux_session_id: None,
         console_pane_id: Some(spawned.console_pane_id),
         agent_pane_id: Some(spawned.agent_pane_id),
+        agent_base_url: attach_url.clone().or(inferred_base_url),
+        agent_session_id: attach_session_id.clone().or(inferred_session_id),
     });
 
     match created {

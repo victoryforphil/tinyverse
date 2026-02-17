@@ -1674,6 +1674,8 @@ mod tests {
             tmux_session_id: Some(String::from("$1")),
             console_pane_id: Some(String::from("%1")),
             agent_pane_id: Some(String::from("%2")),
+            agent_base_url: Some(String::from("http://127.0.0.1:4150")),
+            agent_session_id: None,
             created_at: epoch_naive(),
             last_message_at: None,
             updated_at: epoch_naive(),

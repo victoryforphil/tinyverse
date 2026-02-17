@@ -8,15 +8,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
-use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use log::{info, warn};
 
-use crate::dir_utils::{TinyversePaths, resolve_tinyverse_paths};
+use crate::dir_utils::{resolve_tinyverse_paths, TinyversePaths};
 use crate::tmux::{ListSessionsOptions, TmuxClient};
 
-use self::models::{NewSessionRecord, SessionRecord};
-use self::schema::tinyverse_sessions;
+use self::models::{AgentServiceRecord, NewAgentServiceRecord, NewSessionRecord, SessionRecord};
+use self::schema::{tinyverse_agent_services, tinyverse_sessions};
 
+pub use self::models::AgentServiceRecord as StoredAgentService;
 pub use self::models::SessionRecord as StoredSession;
 
 pub const STATUS_ACTIVE: &str = "active";
@@ -33,6 +34,18 @@ pub struct CreateSessionInput {
     pub tmux_session_id: Option<String>,
     pub console_pane_id: Option<String>,
     pub agent_pane_id: Option<String>,
+    pub agent_base_url: Option<String>,
+    pub agent_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpsertAgentServiceInput {
+    pub provider_key: String,
+    pub tmux_session_name: String,
+    pub tmux_pane_id: Option<String>,
+    pub hostname: String,
+    pub port: u16,
+    pub base_url: String,
 }
 
 #[derive(Debug, Clone)]
@@ -153,6 +166,8 @@ impl SessionStore {
             tmux_session_id: input.tmux_session_id.as_deref(),
             console_pane_id: input.console_pane_id.as_deref(),
             agent_pane_id: input.agent_pane_id.as_deref(),
+            agent_base_url: input.agent_base_url.as_deref(),
+            agent_session_id: input.agent_session_id.as_deref(),
         };
 
         diesel::insert_into(tinyverse_sessions::table)
@@ -180,6 +195,65 @@ impl SessionStore {
         )
         .execute(&mut self.conn)
         .with_context(|| format!("failed to delete session `{session_key}`"))?;
+
+        Ok(deleted > 0)
+    }
+
+    pub fn find_agent_service(&mut self, provider_key: &str) -> Result<Option<AgentServiceRecord>> {
+        tinyverse_agent_services::table
+            .filter(tinyverse_agent_services::provider_key.eq(provider_key))
+            .select(AgentServiceRecord::as_select())
+            .first::<AgentServiceRecord>(&mut self.conn)
+            .optional()
+            .with_context(|| format!("failed to read agent service `{provider_key}`"))
+    }
+
+    pub fn upsert_agent_service(
+        &mut self,
+        input: &UpsertAgentServiceInput,
+    ) -> Result<AgentServiceRecord> {
+        let new_record = NewAgentServiceRecord {
+            provider_key: &input.provider_key,
+            tmux_session_name: &input.tmux_session_name,
+            tmux_pane_id: input.tmux_pane_id.as_deref(),
+            hostname: &input.hostname,
+            port: i32::from(input.port),
+            base_url: &input.base_url,
+        };
+
+        diesel::insert_into(tinyverse_agent_services::table)
+            .values(&new_record)
+            .on_conflict(tinyverse_agent_services::provider_key)
+            .do_update()
+            .set((
+                tinyverse_agent_services::tmux_session_name.eq(&input.tmux_session_name),
+                tinyverse_agent_services::tmux_pane_id.eq(input.tmux_pane_id.as_deref()),
+                tinyverse_agent_services::hostname.eq(&input.hostname),
+                tinyverse_agent_services::port.eq(i32::from(input.port)),
+                tinyverse_agent_services::base_url.eq(&input.base_url),
+                tinyverse_agent_services::updated_at.eq(diesel::dsl::sql::<
+                    diesel::sql_types::Timestamp,
+                >("CURRENT_TIMESTAMP")),
+            ))
+            .execute(&mut self.conn)
+            .with_context(|| format!("failed to upsert agent service `{}`", input.provider_key))?;
+
+        self.find_agent_service(&input.provider_key)?
+            .with_context(|| {
+                format!(
+                    "agent service `{}` was upserted but not found",
+                    input.provider_key
+                )
+            })
+    }
+
+    pub fn delete_agent_service(&mut self, provider_key: &str) -> Result<bool> {
+        let deleted = diesel::delete(
+            tinyverse_agent_services::table
+                .filter(tinyverse_agent_services::provider_key.eq(provider_key)),
+        )
+        .execute(&mut self.conn)
+        .with_context(|| format!("failed to delete agent service `{provider_key}`"))?;
 
         Ok(deleted > 0)
     }

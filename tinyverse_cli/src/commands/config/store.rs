@@ -21,6 +21,8 @@ pub struct TinyverseConfig {
     pub tmux: TmuxConfig,
     #[serde(default)]
     pub tui: TuiConfig,
+    #[serde(default)]
+    pub opencode: OpencodeConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -86,6 +88,24 @@ pub struct TuiConfig {
     pub theme: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpencodeConfig {
+    #[serde(default)]
+    pub server: OpencodeServerConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OpencodeServerConfig {
+    #[serde(default = "default_opencode_server_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_opencode_server_hostname")]
+    pub hostname: String,
+    #[serde(default = "default_opencode_server_port")]
+    pub port: u16,
+    #[serde(default = "default_opencode_server_tmux_session_name")]
+    pub tmux_session_name: String,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TmuxLayoutDirection {
@@ -138,6 +158,25 @@ impl Default for TuiConfig {
     }
 }
 
+impl Default for OpencodeConfig {
+    fn default() -> Self {
+        Self {
+            server: OpencodeServerConfig::default(),
+        }
+    }
+}
+
+impl Default for OpencodeServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_opencode_server_enabled(),
+            hostname: default_opencode_server_hostname(),
+            port: default_opencode_server_port(),
+            tmux_session_name: default_opencode_server_tmux_session_name(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct LoadedConfig {
     pub config: TinyverseConfig,
@@ -168,6 +207,7 @@ struct PartialTinyverseConfig {
     spawn: Option<PartialSpawnConfig>,
     tmux: Option<PartialTmuxConfig>,
     tui: Option<PartialTuiConfig>,
+    opencode: Option<PartialOpencodeConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -209,6 +249,19 @@ struct PartialTmuxLayoutConfig {
 struct PartialTuiConfig {
     refresh_hz: Option<u16>,
     theme: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PartialOpencodeConfig {
+    server: Option<PartialOpencodeServerConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PartialOpencodeServerConfig {
+    enabled: Option<bool>,
+    hostname: Option<String>,
+    port: Option<u16>,
+    tmux_session_name: Option<String>,
 }
 
 pub fn load() -> Result<TinyverseConfig> {
@@ -315,6 +368,7 @@ fn apply_partial(target: &mut TinyverseConfig, partial: PartialTinyverseConfig) 
         spawn,
         tmux,
         tui,
+        opencode,
     } = partial;
 
     if let Some(shell) = shell
@@ -372,6 +426,29 @@ fn apply_partial(target: &mut TinyverseConfig, partial: PartialTinyverseConfig) 
             target.tui.theme = tui.theme;
         }
     }
+
+    if let Some(opencode) = opencode
+        && let Some(server) = opencode.server
+    {
+        if let Some(enabled) = server.enabled {
+            target.opencode.server.enabled = enabled;
+        }
+        if let Some(hostname) = server.hostname
+            && !hostname.trim().is_empty()
+        {
+            target.opencode.server.hostname = hostname;
+        }
+        if let Some(port) = server.port
+            && port > 0
+        {
+            target.opencode.server.port = port;
+        }
+        if let Some(name) = server.tmux_session_name
+            && !name.trim().is_empty()
+        {
+            target.opencode.server.tmux_session_name = name;
+        }
+    }
 }
 
 fn default_branch_prefix() -> String {
@@ -404,6 +481,22 @@ fn default_tmux_layout_primary() -> TmuxLayoutPrimary {
 
 fn default_tui_refresh_hz() -> u16 {
     1
+}
+
+fn default_opencode_server_enabled() -> bool {
+    true
+}
+
+fn default_opencode_server_hostname() -> String {
+    "127.0.0.1".to_owned()
+}
+
+fn default_opencode_server_port() -> u16 {
+    4150
+}
+
+fn default_opencode_server_tmux_session_name() -> String {
+    "tinyverse_opencode_server".to_owned()
 }
 
 #[cfg(test)]
@@ -443,6 +536,7 @@ mod tests {
             },
             tmux: super::TmuxConfig::default(),
             tui: super::TuiConfig::default(),
+            opencode: super::OpencodeConfig::default(),
         };
 
         let written = save_to_path(&config, path.clone()).expect("save should succeed");

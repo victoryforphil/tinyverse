@@ -6,8 +6,8 @@ use tinyverse_lib::TINYVERSE_DIR_HOME_ENV;
 use crate::commands::{
     attach::args::AttachArgs, config::command::ConfigCommands, debug::args::DebugCommands,
     detach::args::DetachArgs, gha_babysit::args::GhaBabysitArgs, kill::args::KillArgs,
-    list::args::ListArgs, prompt::args::PromptCommands, send::args::SendArgs,
-    spawn::args::SpawnArgs, tui::args::TuiArgs, view::args::ViewArgs,
+    list::args::ListArgs, opencode_server::args::OpencodeServerArgs, prompt::args::PromptCommands,
+    send::args::SendArgs, spawn::args::SpawnArgs, tui::args::TuiArgs, view::args::ViewArgs,
 };
 
 #[derive(Debug, Parser)]
@@ -41,6 +41,9 @@ pub enum Commands {
         #[command(subcommand)]
         command: PromptCommands,
     },
+    /// Manage the shared OpenCode server used by TinyVerse
+    #[command(name = "opencode-server")]
+    OpencodeServer(OpencodeServerArgs),
     /// List known TinyVerse sessions
     List(ListArgs),
     /// Spawn a new TinyVerse session
