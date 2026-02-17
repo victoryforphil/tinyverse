@@ -5,3 +5,6 @@ bun:
 
 rust:
   version: "stable"
+
+proto:
+  version: "0.53.1"

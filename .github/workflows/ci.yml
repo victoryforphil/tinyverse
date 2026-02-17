@@ -16,7 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
       - name: Install proto and moon
         run: |
           curl -fsSL https://moonrepo.dev/install/proto.sh | bash -s -- --yes --no-profile
@@ -24,7 +23,7 @@ jobs:
           echo "$HOME/.proto/shims" >> "$GITHUB_PATH"
           export PATH="$HOME/.proto/bin:$HOME/.proto/shims:$PATH"
           proto install
-          moon :install
+          moon run :install --concurrency 1
       - name: Build
         run: bun scripts/ci.sh.ts build
       - name: Check
@@ -51,7 +50,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install proto
+        run: |
+          curl -fsSL https://moonrepo.dev/install/proto.sh | bash -s -- --yes --no-profile
+          echo "$HOME/.proto/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.proto/shims" >> "$GITHUB_PATH"
+          export PATH="$HOME/.proto/bin:$HOME/.proto/shims:$PATH"
+          proto install
       - name: Render snapshot review HTML
         run: bun scripts/ci.sh.ts snapshots
       - name: Upload snapshot review HTML
@@ -74,7 +79,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install proto
+        run: |
+          curl -fsSL https://moonrepo.dev/install/proto.sh | bash -s -- --yes --no-profile
+          echo "$HOME/.proto/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.proto/shims" >> "$GITHUB_PATH"
+          export PATH="$HOME/.proto/bin:$HOME/.proto/shims:$PATH"
+          proto install
       - name: Build release binary
         env:
           CI_ARTIFACT_DIR: ci-artifacts/${{ runner.os }}-${{ runner.arch }}

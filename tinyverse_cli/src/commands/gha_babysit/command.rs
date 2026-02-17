@@ -137,7 +137,7 @@ fn format_table_report(report: &GhaBabysitReport) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_report, format_table_report, format_text_report, GhaBabysitArgs};
+    use super::{GhaBabysitArgs, build_report, format_table_report, format_text_report};
 
     #[test]
     fn includes_targeted_run_when_provided() {

@@ -91,6 +91,18 @@ Single-test note:
 - Keep diffs minimal and style-consistent.
 - Confirm no obvious runtime breakage from edited flow.
 
+## Agent Reporting
+
+- Default final task reports should be concise and high-signal.
+- Prefer a short bullet list covering only:
+  - high-level changes (file paths optional)
+  - notable challenges/fixes
+  - docs/notes added
+  - testing performed with pass/fail
+  - how to run/use the result
+  - next steps or open questions (if any)
+- Avoid long narrative summaries unless the user explicitly asks for deep detail.
+
 ## Agent Workflows
 
 ### TUI refinement (parent-orchestrated)

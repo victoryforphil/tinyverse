@@ -30,6 +30,7 @@
 
 - Root command: `tinyverse`
 - In this repo, run commands via: `cargo run -p tinyverse_cli -- <command>`
+- Running `tinyverse` with no subcommand launches `tinyverse tui`.
 - Global override for tinyverse home path:
   - `--tinyverse-dir-home <path>`
   - `TINYVERSE_DIR_HOME=<path>`

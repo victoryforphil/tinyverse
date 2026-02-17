@@ -5,4 +5,4 @@ import { runMoon } from "./helpers/moon.sh.ts";
 const args = Bun.argv.slice(2);
 const taskArgs = args.length > 0 ? args : [":check"];
 
-await runMoon(taskArgs);
+await runMoon([...taskArgs, "--concurrency", "1"]);

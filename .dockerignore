@@ -1,0 +1,10 @@
+.git
+.github
+target
+.moon/cache
+.moon/tasks
+.moon/docker
+.tinyverse
+.tinyverse-smoke
+docs/examples/tinyverse_ui/snapshot_reviews
+node_modules
