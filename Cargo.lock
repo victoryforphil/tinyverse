@@ -413,6 +413,14 @@ dependencies = [
 [[package]]
 name = "tinyverse_lib"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "log",
+ "pretty_env_logger",
+ "serde",
+ "toml",
+]
 
 [[package]]
 name = "toml"
