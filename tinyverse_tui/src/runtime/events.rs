@@ -3,14 +3,14 @@ use std::process::{Command, Stdio};
 
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEventKind, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use tinyverse_lib::{
-    resolve_session_name, CreateSessionInput, PaneTarget, PanelRole, SendKeysOptions, SessionStore,
-    SessionTarget, SpawnSessionOptions, TmuxClient,
+    CapturePaneOptions, CreateSessionInput, PaneTarget, PanelRole, SendKeysOptions, SessionStore,
+    SessionTarget, SpawnSessionOptions, TmuxClient, resolve_session_name,
 };
 
-use crate::app::{App, AppMode, MenuAction, MENU_ACTIONS};
+use crate::app::{App, AppMode, MENU_ACTIONS, MenuAction};
 
 use super::helpers::rect_contains;
 use super::{restore_terminal, setup_terminal};
@@ -45,14 +45,28 @@ fn handle_key_event(
         AppMode::Normal => match key {
             KeyCode::Esc | KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Up | KeyCode::Char('k') | KeyCode::Left | KeyCode::Char('h') => {
-                app.select_prev()
+                app.select_prev();
+                refresh_selected_preview(app);
             }
             KeyCode::Down | KeyCode::Char('j') | KeyCode::Right | KeyCode::Char('l') => {
-                app.select_next()
+                app.select_next();
+                refresh_selected_preview(app);
             }
-            KeyCode::Char('r') => app.refresh(store)?,
+            KeyCode::Char('r') => refresh_sessions_and_preview(app, store)?,
             KeyCode::Char('i') | KeyCode::Tab => app.toggle_inspector(),
             KeyCode::Enter => app.open_action_menu(),
+            KeyCode::Char('a') => attach_selected_session(terminal, app)?,
+            KeyCode::Char('s') => {
+                app.reset_spawn_form();
+                app.mode = AppMode::SpawnInput;
+            }
+            KeyCode::Char('x') => {
+                if app.selected_session().is_some() {
+                    app.mode = AppMode::ConfirmKill;
+                } else {
+                    app.status_message = String::from("No session selected");
+                }
+            }
             _ => {}
         },
         AppMode::ActionMenu => match key {
@@ -82,6 +96,17 @@ fn handle_key_event(
             }
             _ => {}
         },
+        AppMode::ConfirmKillAll => match key {
+            KeyCode::Esc | KeyCode::Char('n') => {
+                app.mode = AppMode::ActionMenu;
+                app.status_message = String::from("Kill all canceled");
+            }
+            KeyCode::Enter | KeyCode::Char('y') => {
+                kill_all_sessions(app, store)?;
+                app.mode = AppMode::Normal;
+            }
+            _ => {}
+        },
         AppMode::SendInput => match key {
             KeyCode::Esc => {
                 app.mode = AppMode::Normal;
@@ -97,13 +122,15 @@ fn handle_key_event(
         AppMode::SpawnInput => match key {
             KeyCode::Esc => {
                 app.mode = AppMode::Normal;
-                app.input_buffer.clear();
+                app.reset_spawn_form();
             }
             KeyCode::Enter => spawn_session_from_input(app, store)?,
+            KeyCode::Tab => app.spawn_form.next_field(),
+            KeyCode::BackTab => app.spawn_form.prev_field(),
             KeyCode::Backspace => {
-                app.input_buffer.pop();
+                app.spawn_form.active_field_mut().pop();
             }
-            KeyCode::Char(c) => app.input_buffer.push(c),
+            KeyCode::Char(c) => app.spawn_form.active_field_mut().push(c),
             _ => {}
         },
     }
@@ -148,6 +175,18 @@ fn handle_mouse_event(
         return Ok(());
     }
 
+    if app.mode == AppMode::ConfirmKillAll {
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+            if let Some(confirm_rect) = app.layout.confirm_rect {
+                if !rect_contains(confirm_rect, x, y) {
+                    app.mode = AppMode::ActionMenu;
+                    app.status_message = String::from("Kill all canceled");
+                }
+            }
+        }
+        return Ok(());
+    }
+
     if matches!(app.mode, AppMode::SendInput | AppMode::SpawnInput) {
         return Ok(());
     }
@@ -160,11 +199,13 @@ fn handle_mouse_event(
             }
             if let Some(index) = card_index_from_position(x, y, app) {
                 app.selected_index = index;
+                refresh_selected_preview(app);
             }
         }
         MouseEventKind::Down(MouseButton::Right) => {
             if let Some(index) = card_index_from_position(x, y, app) {
                 app.selected_index = index;
+                refresh_selected_preview(app);
                 app.mode = AppMode::ActionMenu;
                 app.action_menu_index = 0;
                 app.action_menu_anchor = Some((x, y));
@@ -183,6 +224,13 @@ fn handle_mouse_event(
         _ => {}
     }
 
+    if matches!(
+        mouse.kind,
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+    ) {
+        refresh_selected_preview(app);
+    }
+
     Ok(())
 }
 
@@ -194,7 +242,7 @@ fn execute_menu_action(
 ) -> Result<()> {
     match action {
         MenuAction::Refresh => {
-            app.refresh(store)?;
+            refresh_sessions_and_preview(app, store)?;
             app.mode = AppMode::Normal;
         }
         MenuAction::ToggleInspector => {
@@ -210,7 +258,7 @@ fn execute_menu_action(
             app.mode = AppMode::SendInput;
         }
         MenuAction::SpawnSession => {
-            app.input_buffer = String::from("tinyverse_");
+            app.reset_spawn_form();
             app.mode = AppMode::SpawnInput;
         }
         MenuAction::KillSession => {
@@ -223,6 +271,14 @@ fn execute_menu_action(
         }
         MenuAction::CloseMenu => {
             app.mode = AppMode::Normal;
+        }
+        MenuAction::KillAllSessions => {
+            if app.sessions.is_empty() {
+                app.status_message = String::from("No sessions available");
+                app.mode = AppMode::Normal;
+            } else {
+                app.mode = AppMode::ConfirmKillAll;
+            }
         }
     }
 
@@ -297,14 +353,24 @@ fn send_console_input(app: &mut App) {
 }
 
 fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<()> {
-    let mut session_name = app.input_buffer.trim().to_owned();
+    let mut session_name = app.spawn_form.session_name.trim().to_owned();
     if session_name.is_empty() {
         session_name = resolve_session_name(None, store)?;
     }
 
+    let agent_type = if app.spawn_form.agent_type.trim().is_empty() {
+        String::from("opencode")
+    } else {
+        app.spawn_form.agent_type.trim().to_owned()
+    };
+
+    let prompt = app.spawn_form.prompt.trim().to_owned();
+    let model = app.spawn_form.model.trim().to_owned();
+
     let tmux_session_name = session_name.clone();
-    let spawn_result =
-        TmuxClient::new().spawn_session(SpawnSessionOptions::new(&tmux_session_name));
+    let mut spawn_options = SpawnSessionOptions::new(&tmux_session_name);
+    spawn_options.agent_command = Some(build_agent_command(&agent_type, &model, &prompt));
+    let spawn_result = TmuxClient::new().spawn_session(spawn_options);
 
     let spawned = match spawn_result {
         Ok(value) => value,
@@ -326,7 +392,7 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
 
     match created {
         Ok(record) => {
-            app.refresh(store)?;
+            refresh_sessions_and_preview(app, store)?;
             if let Some(index) = app
                 .sessions
                 .iter()
@@ -334,8 +400,9 @@ fn spawn_session_from_input(app: &mut App, store: &mut SessionStore) -> Result<(
             {
                 app.selected_index = index;
             }
-            app.status_message = format!("Spawned {}", record.session_name);
-            app.input_buffer.clear();
+            refresh_selected_preview(app);
+            app.status_message = format!("Spawned {} ({})", record.session_name, agent_type);
+            app.reset_spawn_form();
             app.mode = AppMode::Normal;
         }
         Err(error) => {
@@ -355,7 +422,7 @@ fn kill_selected_session(app: &mut App, store: &mut SessionStore) -> Result<()> 
     let tmux_client = TmuxClient::new();
     let tmux_result = tmux_client.kill_session(SessionTarget::new(session.tmux_session_name));
     let db_deleted = store.delete_session_by_key(&session.session_key)?;
-    app.refresh(store)?;
+    refresh_sessions_and_preview(app, store)?;
 
     app.status_message = match (tmux_result, db_deleted) {
         (Ok(()), true) => format!("Killed {}", session.session_name),
@@ -370,6 +437,80 @@ fn kill_selected_session(app: &mut App, store: &mut SessionStore) -> Result<()> 
     };
 
     Ok(())
+}
+
+fn kill_all_sessions(app: &mut App, store: &mut SessionStore) -> Result<()> {
+    let sessions = app.sessions.clone();
+    let tmux_client = TmuxClient::new();
+
+    let mut deleted_count = 0usize;
+    let mut tmux_failures = 0usize;
+
+    for session in sessions {
+        if tmux_client
+            .kill_session(SessionTarget::new(session.tmux_session_name.clone()))
+            .is_err()
+        {
+            tmux_failures += 1;
+        }
+        if store.delete_session_by_key(&session.session_key)? {
+            deleted_count += 1;
+        }
+    }
+
+    refresh_sessions_and_preview(app, store)?;
+    app.status_message = if tmux_failures == 0 {
+        format!("Killed {deleted_count} session(s)")
+    } else {
+        format!("Killed {deleted_count} from DB; {tmux_failures} tmux kill(s) failed")
+    };
+
+    Ok(())
+}
+
+fn refresh_sessions_and_preview(app: &mut App, store: &mut SessionStore) -> Result<()> {
+    app.refresh(store)?;
+    refresh_selected_preview(app);
+    Ok(())
+}
+
+pub(crate) fn refresh_selected_preview(app: &mut App) {
+    let Some(session) = app.selected_session().cloned() else {
+        return;
+    };
+
+    let mut options = CapturePaneOptions::new(SessionTarget::new(session.tmux_session_name));
+    options.pane = Some(PaneTarget::Role(PanelRole::Console));
+    options.start_line = Some(-60);
+
+    let text = match TmuxClient::new().capture_pane(options) {
+        Ok(captured) => captured.text,
+        Err(error) => format!("Preview unavailable: {error}"),
+    };
+    app.pane_preview_cache.insert(session.session_key, text);
+}
+
+fn build_agent_command(agent: &str, model: &str, prompt: &str) -> String {
+    let mut parts = vec![agent.to_owned()];
+
+    if !model.is_empty() {
+        parts.push(String::from("--model"));
+        parts.push(shell_escape(model));
+    }
+    if !prompt.is_empty() {
+        parts.push(String::from("--prompt"));
+        parts.push(shell_escape(prompt));
+    }
+
+    parts.join(" ")
+}
+
+fn shell_escape(value: &str) -> String {
+    if value.is_empty() {
+        return String::from("''");
+    }
+    let escaped = value.replace('\'', "'\"'\"'");
+    format!("'{escaped}'")
 }
 
 fn digit_to_index(ch: char) -> Option<usize> {

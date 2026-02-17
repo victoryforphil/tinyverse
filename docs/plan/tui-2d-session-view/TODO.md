@@ -30,16 +30,22 @@
 
 ## Stage 4 - Mouse + Resize
 
-- [ ] Add click-to-select and right-click context menu.
-- [ ] Add split resize behavior between cards and inspector.
+- [x] Add click-to-select and right-click context menu.
+- [x] Add split resize behavior between cards and inspector.
 
 ## Stage 5 - Operational Actions
 
-- [ ] Wire attach, kill, send, spawn actions.
-- [ ] Harden terminal state transitions around attach.
+- [x] Wire attach, kill, send, spawn actions.
+- [x] Harden terminal state transitions around attach.
 
 ## Verification
 
 - [x] `cargo check --workspace`
 - [x] `cargo test --workspace`
 - [x] manual run: `cargo run -p tinyverse_cli -- tui`
+
+## Final Cleanup
+
+- [x] Split runtime into smaller modules (`runtime.rs`, `runtime/events.rs`, `runtime/render.rs`, `runtime/helpers.rs`).
+- [x] Add snapshot-style render tests for core TUI states.
+- [x] Capture final review notes and deferred polish items.

@@ -1,12 +1,12 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
-use ratatui::Frame;
 
-use crate::app::{App, AppMode, MenuAction, MENU_ACTIONS};
+use crate::app::{App, AppMode, MENU_ACTIONS, MenuAction};
 
-use super::helpers::{anchored_rect, centered_rect, inset_rect, line_kv, truncate_to};
+use super::helpers::{anchored_rect, centered_rect, inset_rect, key_hint, line_kv, truncate_to};
 
 const CARD_WIDTH: u16 = 34;
 const CARD_HEIGHT: u16 = 6;
@@ -33,6 +33,7 @@ pub(crate) fn render_frame(frame: &mut Frame, app: &mut App) {
     match app.mode {
         AppMode::ActionMenu => render_action_menu(frame, root, app),
         AppMode::ConfirmKill => render_kill_confirmation(frame, root, app),
+        AppMode::ConfirmKillAll => render_kill_all_confirmation(frame, root, app),
         AppMode::SendInput => render_input_overlay(frame, root, app, "Send to console"),
         AppMode::SpawnInput => render_input_overlay(frame, root, app, "Spawn session"),
         AppMode::Normal => {}
@@ -179,7 +180,13 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         let body = Paragraph::new(vec![
             line_kv("key", &truncate_to(&session.session_key, 24)),
             line_kv("agent", &truncate_to(&session.agent_type, 20)),
-            line_kv("status", &truncate_to(&session.status_string, 20)),
+            Line::from(vec![
+                Span::styled("status: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    truncate_to(&session.status_string, 20),
+                    Style::default().fg(status_color(&session.status_string)),
+                ),
+            ]),
             line_kv("tmux", &truncate_to(&session.tmux_session_name, 20)),
         ])
         .wrap(Wrap { trim: true });
@@ -196,12 +203,23 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &App) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let lines = if let Some(session) = app.selected_session() {
-        vec![
+    if let Some(session) = app.selected_session() {
+        let inspector_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(9), Constraint::Min(3)])
+            .split(inner);
+
+        let metadata = vec![
             line_kv("name", &session.session_name),
             line_kv("key", &session.session_key),
             line_kv("agent", &session.agent_type),
-            line_kv("status", &session.status_string),
+            Line::from(vec![
+                Span::styled("status: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    session.status_string.clone(),
+                    Style::default().fg(status_color(&session.status_string)),
+                ),
+            ]),
             line_kv("tmux", &session.tmux_session_name),
             line_kv("console", session.console_pane_id.as_deref().unwrap_or("-")),
             line_kv(
@@ -212,15 +230,46 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &App) {
                 "description",
                 session.description.as_deref().unwrap_or("(none)"),
             ),
-        ]
-    } else {
-        vec![Line::from(Span::styled(
-            "No session selected",
-            Style::default().fg(Color::Gray),
-        ))]
-    };
+        ];
+        frame.render_widget(
+            Paragraph::new(metadata).wrap(Wrap { trim: true }),
+            inspector_chunks[0],
+        );
 
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+        let preview_block = Block::default()
+            .title(" Console Preview ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray));
+        let preview_inner = preview_block.inner(inspector_chunks[1]);
+        frame.render_widget(preview_block, inspector_chunks[1]);
+
+        let preview = app
+            .pane_preview_cache
+            .get(&session.session_key)
+            .map(|value| {
+                if value.trim().is_empty() {
+                    String::from("(console pane is empty)")
+                } else {
+                    value.clone()
+                }
+            })
+            .unwrap_or_else(|| String::from("Loading preview..."));
+
+        frame.render_widget(
+            Paragraph::new(preview)
+                .style(Style::default().fg(Color::Gray))
+                .wrap(Wrap { trim: false }),
+            preview_inner,
+        );
+    } else {
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                "No session selected",
+                Style::default().fg(Color::Gray),
+            ))),
+            inner,
+        );
+    }
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
@@ -229,24 +278,56 @@ fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
         .map(|time| format!("refreshed {}s ago", time.elapsed().as_secs()))
         .unwrap_or_else(|| String::from("never refreshed"));
 
-    let mode_hints = match app.mode {
-        AppMode::Normal => "[q] quit [arrows/hjkl] nav [r] refresh [i] inspector [enter] menu",
-        AppMode::ActionMenu => "[j/k] menu [enter] select [1-7] quick [esc] close",
-        AppMode::ConfirmKill => "Confirm kill: [y/enter] yes [n/esc] no",
-        AppMode::SendInput => "Send mode: type command [enter] send [esc] cancel",
-        AppMode::SpawnInput => "Spawn mode: type session name [enter] spawn [esc] cancel",
-    };
+    let mut mode_hints: Vec<Span<'static>> = Vec::new();
+    match app.mode {
+        AppMode::Normal => {
+            mode_hints.extend(key_hint("q", "quit"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("arrows/hjkl", "navigate"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("r", "refresh"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("i", "inspector"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("enter", "actions"));
+        }
+        AppMode::ActionMenu => {
+            mode_hints.extend(key_hint("j/k", "menu"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("enter", "select"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("1-8", "quick"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("esc", "close"));
+        }
+        AppMode::ConfirmKill | AppMode::ConfirmKillAll => {
+            mode_hints.extend(key_hint("y/enter", "confirm"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("n/esc", "cancel"));
+        }
+        AppMode::SendInput => {
+            mode_hints.extend(key_hint("enter", "send"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("esc", "cancel"));
+        }
+        AppMode::SpawnInput => {
+            mode_hints.extend(key_hint("tab", "next field"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("enter", "spawn"));
+            mode_hints.push(Span::raw(" | "));
+            mode_hints.extend(key_hint("esc", "cancel"));
+        }
+    }
 
-    let footer = Line::from(vec![
-        Span::styled(mode_hints, Style::default().fg(Color::Gray)),
-        Span::raw(" | "),
-        Span::styled(
-            app.status_message.as_str(),
-            Style::default().fg(Color::White),
-        ),
-        Span::raw(" | "),
-        Span::styled(refresh, Style::default().fg(Color::DarkGray)),
-    ]);
+    mode_hints.push(Span::raw(" | "));
+    mode_hints.push(Span::styled(
+        app.status_message.as_str().to_owned(),
+        Style::default().fg(Color::White),
+    ));
+    mode_hints.push(Span::raw(" | "));
+    mode_hints.push(Span::styled(refresh, Style::default().fg(Color::DarkGray)));
+
+    let footer = Line::from(mode_hints);
 
     frame.render_widget(Paragraph::new(footer), area);
 }
@@ -271,7 +352,10 @@ fn render_action_menu(frame: &mut Frame, area: Rect, app: &mut App) {
     for (index, action) in MENU_ACTIONS.iter().enumerate() {
         let is_selected = index == app.action_menu_index;
         let prefix = if is_selected { ">" } else { " " };
-        let style = if matches!(action, MenuAction::KillSession) {
+        let style = if matches!(
+            action,
+            MenuAction::KillSession | MenuAction::KillAllSessions
+        ) {
             if is_selected {
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
             } else {
@@ -329,8 +413,44 @@ fn render_kill_confirmation(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_widget(body, inner);
 }
 
+fn render_kill_all_confirmation(frame: &mut Frame, area: Rect, app: &mut App) {
+    let popup = centered_rect(58, 7, area);
+    app.layout.confirm_rect = Some(popup);
+
+    frame.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .title(" Confirm Kill All ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let count = app.sessions.len();
+    let body = Paragraph::new(vec![
+        Line::from(vec![
+            Span::raw("Kill all "),
+            Span::styled(count.to_string(), Style::default().fg(Color::Red)),
+            Span::raw(" sessions?"),
+        ]),
+        Line::from("This will terminate tmux sessions and remove DB records."),
+        Line::from(""),
+        Line::from(Span::styled(
+            "[y/enter] confirm  [n/esc] cancel",
+            Style::default().fg(Color::Yellow),
+        )),
+    ])
+    .wrap(Wrap { trim: true });
+    frame.render_widget(body, inner);
+}
+
 fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App, title: &str) {
-    let popup = centered_rect(70, 6, area);
+    let popup_height = if app.mode == AppMode::SpawnInput {
+        10
+    } else {
+        6
+    };
+    let popup = centered_rect(70, popup_height, area);
     frame.render_widget(Clear, popup);
 
     let block = Block::default()
@@ -340,39 +460,90 @@ fn render_input_overlay(frame: &mut Frame, area: Rect, app: &App, title: &str) {
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
-    let prompt = match app.mode {
-        AppMode::SendInput => "Command:",
-        AppMode::SpawnInput => "Session name:",
-        _ => "Input:",
+    let lines = if app.mode == AppMode::SpawnInput {
+        vec![
+            form_line(
+                "Session",
+                app.spawn_form.session_name.as_str(),
+                app.spawn_form.active_field == 0,
+            ),
+            form_line(
+                "Agent",
+                app.spawn_form.agent_type.as_str(),
+                app.spawn_form.active_field == 1,
+            ),
+            form_line(
+                "Model",
+                app.spawn_form.model.as_str(),
+                app.spawn_form.active_field == 2,
+            ),
+            form_line(
+                "Prompt",
+                app.spawn_form.prompt.as_str(),
+                app.spawn_form.active_field == 3,
+            ),
+            Line::from(""),
+            Line::from(Span::styled(
+                "[tab] next field  [enter] spawn  [esc] cancel",
+                Style::default().fg(Color::Gray),
+            )),
+        ]
+    } else {
+        vec![
+            Line::from("Command:"),
+            Line::from(Span::styled(
+                app.input_buffer.as_str(),
+                Style::default().fg(Color::White),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "[enter] submit  [esc] cancel",
+                Style::default().fg(Color::Gray),
+            )),
+        ]
     };
-
-    let lines = vec![
-        Line::from(prompt),
-        Line::from(Span::styled(
-            app.input_buffer.as_str(),
-            Style::default().fg(Color::White),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "[enter] submit  [esc] cancel",
-            Style::default().fg(Color::Gray),
-        )),
-    ];
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+fn form_line(label: &str, value: &str, active: bool) -> Line<'static> {
+    let value_style = if active {
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+    Line::from(vec![
+        Span::styled(format!("{label}: "), Style::default().fg(Color::DarkGray)),
+        Span::styled(value.to_owned(), value_style),
+    ])
+}
+
+fn status_color(status: &str) -> Color {
+    if status.eq_ignore_ascii_case("active") {
+        return Color::Green;
+    }
+    if status.eq_ignore_ascii_case("stale") {
+        return Color::Yellow;
+    }
+    if status.eq_ignore_ascii_case("dead") {
+        return Color::Red;
+    }
+    Color::Gray
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::{DateTime, NaiveDateTime};
     use insta::assert_snapshot;
+    use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
-    use ratatui::Terminal;
     use tinyverse_lib::StoredSession;
 
     use super::render_frame;
-    use crate::app::{App, AppMode};
     use crate::TuiRunOptions;
+    use crate::app::{App, AppMode};
 
     #[test]
     fn renders_empty_state_snapshot() {

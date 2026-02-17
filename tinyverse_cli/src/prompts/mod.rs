@@ -55,7 +55,7 @@ fn render_opencode_prompt(user_prompt: Option<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_launch_prompt, resolve_user_prompt, USER_PROMPT_BLOCK_PLACEHOLDER};
+    use super::{USER_PROMPT_BLOCK_PLACEHOLDER, resolve_launch_prompt, resolve_user_prompt};
 
     #[test]
     fn opencode_prompt_includes_default_context_without_user_prompt() {

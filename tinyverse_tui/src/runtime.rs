@@ -9,14 +9,14 @@ use anyhow::Result;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
-use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 use tinyverse_lib::SessionStore;
 
-use crate::app::App;
 use crate::TuiRunOptions;
+use crate::app::App;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(120);
 
@@ -26,6 +26,7 @@ pub fn run(options: TuiRunOptions) -> Result<()> {
 
     let mut app = App::new(options);
     app.refresh(&mut store)?;
+    events::refresh_selected_preview(&mut app);
 
     let mut terminal = setup_terminal()?;
     let run_result = run_loop(&mut terminal, &mut store, &mut app);
@@ -79,6 +80,7 @@ fn run_loop(
 
         if Instant::now() >= next_refresh_at {
             app.refresh(store)?;
+            events::refresh_selected_preview(app);
             next_refresh_at = Instant::now() + app.options.refresh_interval;
         }
     }

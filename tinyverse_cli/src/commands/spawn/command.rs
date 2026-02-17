@@ -1,16 +1,16 @@
 use anyhow::{Context, Result};
 use log::info;
 use tinyverse_lib::tmux::{SpawnSessionOptions, TmuxClient};
-use tinyverse_lib::{resolve_session_name, CreateSessionInput, SessionStore};
+use tinyverse_lib::{CreateSessionInput, SessionStore, resolve_session_name};
 use tinyverse_ui::{
-    default_stdout_context, ActionLine, DetailSection, GuidanceLine, LabeledField, Panel, Tone,
+    ActionLine, DetailSection, GuidanceLine, LabeledField, Panel, Tone, default_stdout_context,
 };
 
 use super::args::SpawnArgs;
 use crate::commands::config::store;
 use crate::commands::output::display_session_name;
 use crate::prompts::{resolve_launch_prompt, resolve_user_prompt};
-use crate::providers::{find_by_key, LaunchContext};
+use crate::providers::{LaunchContext, find_by_key};
 
 pub fn execute(args: SpawnArgs) -> Result<()> {
     let config = store::load()?;

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Instant;
 
 use anyhow::Result;
@@ -11,6 +12,7 @@ pub enum AppMode {
     Normal,
     ActionMenu,
     ConfirmKill,
+    ConfirmKillAll,
     SendInput,
     SpawnInput,
 }
@@ -23,6 +25,7 @@ pub enum MenuAction {
     SendToConsole,
     SpawnSession,
     KillSession,
+    KillAllSessions,
     CloseMenu,
 }
 
@@ -35,20 +38,66 @@ impl MenuAction {
             Self::SendToConsole => "Send command to console pane",
             Self::SpawnSession => "Spawn new session",
             Self::KillSession => "Kill selected session",
+            Self::KillAllSessions => "Kill all sessions",
             Self::CloseMenu => "Close menu",
         }
     }
 }
 
-pub const MENU_ACTIONS: [MenuAction; 7] = [
+pub const MENU_ACTIONS: [MenuAction; 8] = [
     MenuAction::Refresh,
     MenuAction::ToggleInspector,
     MenuAction::AttachSession,
     MenuAction::SendToConsole,
     MenuAction::SpawnSession,
     MenuAction::KillSession,
+    MenuAction::KillAllSessions,
     MenuAction::CloseMenu,
 ];
+
+#[derive(Debug, Clone)]
+pub struct SpawnForm {
+    pub session_name: String,
+    pub agent_type: String,
+    pub model: String,
+    pub prompt: String,
+    pub active_field: usize,
+}
+
+impl Default for SpawnForm {
+    fn default() -> Self {
+        Self {
+            session_name: String::from("tinyverse_"),
+            agent_type: String::from("opencode"),
+            model: String::new(),
+            prompt: String::new(),
+            active_field: 0,
+        }
+    }
+}
+
+impl SpawnForm {
+    pub fn next_field(&mut self) {
+        self.active_field = (self.active_field + 1) % 4;
+    }
+
+    pub fn prev_field(&mut self) {
+        self.active_field = if self.active_field == 0 {
+            3
+        } else {
+            self.active_field - 1
+        };
+    }
+
+    pub fn active_field_mut(&mut self) -> &mut String {
+        match self.active_field {
+            0 => &mut self.session_name,
+            1 => &mut self.agent_type,
+            2 => &mut self.model,
+            _ => &mut self.prompt,
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct LayoutCache {
@@ -71,6 +120,8 @@ pub struct App {
     pub action_menu_index: usize,
     pub action_menu_anchor: Option<(u16, u16)>,
     pub input_buffer: String,
+    pub spawn_form: SpawnForm,
+    pub pane_preview_cache: HashMap<String, String>,
     pub should_quit: bool,
     pub status_message: String,
     pub last_refresh_at: Option<Instant>,
@@ -91,6 +142,8 @@ impl App {
             action_menu_index: 0,
             action_menu_anchor: None,
             input_buffer: String::new(),
+            spawn_form: SpawnForm::default(),
+            pane_preview_cache: HashMap::new(),
             should_quit: false,
             status_message: String::from("Starting tinyverse TUI"),
             last_refresh_at: None,
@@ -99,7 +152,9 @@ impl App {
     }
 
     pub fn refresh(&mut self, store: &mut SessionStore) -> Result<()> {
+        store.reconcile_now()?;
         self.sessions = store.list_sessions()?;
+        self.pane_preview_cache.clear();
         if self.sessions.is_empty() {
             self.selected_index = 0;
             self.scroll_row = 0;
@@ -149,6 +204,10 @@ impl App {
         self.mode = AppMode::ActionMenu;
         self.action_menu_index = 0;
         self.action_menu_anchor = None;
+    }
+
+    pub fn reset_spawn_form(&mut self) {
+        self.spawn_form = SpawnForm::default();
     }
 
     pub fn close_action_menu(&mut self) {

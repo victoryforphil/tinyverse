@@ -10,4 +10,5 @@ Files:
 - `01-dark-factory-port-map.md` - concrete source-to-target component mapping.
 - `02-implementation-plan.plan.md` - staged build plan with acceptance gates.
 - `03-implementation.prompt.md` - implementation handoff prompt.
+- `04-final-review-notes.md` - post-build refinement notes and deferred polish.
 - `TODO.md` - active execution checklist for this plan.

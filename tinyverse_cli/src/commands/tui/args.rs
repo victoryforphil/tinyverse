@@ -6,3 +6,11 @@ pub struct TuiArgs {
     #[arg(long, default_value_t = 3000)]
     pub refresh_interval_ms: u64,
 }
+
+impl Default for TuiArgs {
+    fn default() -> Self {
+        Self {
+            refresh_interval_ms: 3000,
+        }
+    }
+}

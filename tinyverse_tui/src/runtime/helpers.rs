@@ -60,6 +60,14 @@ pub fn line_kv(label: &str, value: &str) -> Line<'static> {
     ])
 }
 
+pub fn key_hint(key: &str, action: &str) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(format!("[{key}]"), Style::default().fg(Color::Cyan)),
+        Span::raw(" "),
+        Span::styled(action.to_owned(), Style::default().fg(Color::Gray)),
+    ]
+}
+
 pub fn truncate_to(value: &str, max_len: usize) -> String {
     if value.chars().count() <= max_len {
         return value.to_owned();

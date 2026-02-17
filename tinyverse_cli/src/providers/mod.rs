@@ -139,8 +139,8 @@ fn shell_escape(value: &str) -> String {
         return "''".to_owned();
     }
 
-    let escaped = value.replace('"', "\\\"");
-    format!("\"{escaped}\"")
+    let escaped = value.replace('\'', "'\"'\"'");
+    format!("'{escaped}'")
 }
 
 #[cfg(test)]
@@ -182,7 +182,7 @@ mod tests {
             args: None,
         });
 
-        assert_eq!(command, "opencode --prompt \"run tests\"");
+        assert_eq!(command, "opencode --prompt 'run tests'");
     }
 
     #[test]
@@ -194,7 +194,7 @@ mod tests {
             args: Some("--prompt {prompt} --model {model}"),
         });
 
-        assert_eq!(command, "opencode --prompt \"triage bug\" --model \"fast\"");
+        assert_eq!(command, "opencode --prompt 'triage bug' --model 'fast'");
     }
 
     #[test]
@@ -206,7 +206,22 @@ mod tests {
             args: Some("--dry-run"),
         });
 
-        assert_eq!(command, "mock-cli --model \"cheap\" --dry-run");
+        assert_eq!(command, "mock-cli --model 'cheap' --dry-run");
+    }
+
+    #[test]
+    fn escapes_shell_sensitive_characters_in_prompt() {
+        let provider = find_by_key("opencode").expect("opencode provider should exist");
+        let command = provider.build_launch_command(LaunchContext {
+            prompt: Some("run `pwd` and $HOME safely; don't expand"),
+            model: None,
+            args: None,
+        });
+
+        assert_eq!(
+            command,
+            "opencode --prompt 'run `pwd` and $HOME safely; don'\"'\"'t expand'"
+        );
     }
 
     #[test]

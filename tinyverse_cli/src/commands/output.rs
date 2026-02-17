@@ -43,7 +43,7 @@ where
 mod tests {
     use serde::Serialize;
 
-    use super::{display_session_name, render_output, OutputFormat};
+    use super::{OutputFormat, display_session_name, render_output};
 
     #[derive(Serialize)]
     struct Example {

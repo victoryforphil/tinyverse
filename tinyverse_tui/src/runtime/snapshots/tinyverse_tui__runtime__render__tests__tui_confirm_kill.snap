@@ -1,5 +1,6 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
+assertion_line: 576
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
@@ -13,28 +14,28 @@ tinyverse tui  |  1 session(s)
                                                                                   │agent pane: %2                      │
                                                                                   │description: Snapshot test session  │
                                                                                   │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                               ┌ Confirm Kill ──────────────────────────────────────────┐                              │
-                               │Kill session `tinyverse_alpha`?                         │                              │
-                               │This will terminate tmux session and remove DB record.  │                              │
-                               │                                                        │                              │
-                               │[y/enter] confirm  [n/esc] cancel                       │                              │
-                               │                                                        │                              │
-                               └────────────────────────────────────────────────────────┘                              │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
-                                                                                  │                                    │
+                                                                                  │┌ Console Preview ─────────────────┐│
+                                                                                  ││Loading preview...                ││
+                                                                                  ││                                  ││
+                               ┌ Confirm Kill ──────────────────────────────────────────┐                             ││
+                               │Kill session `tinyverse_alpha`?                         │                             ││
+                               │This will terminate tmux session and remove DB record.  │                             ││
+                               │                                                        │                             ││
+                               │[y/enter] confirm  [n/esc] cancel                       │                             ││
+                               │                                                        │                             ││
+                               └────────────────────────────────────────────────────────┘                             ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  ││                                  ││
+                                                                                  │└──────────────────────────────────┘│
                                                                                   └────────────────────────────────────┘
-Confirm kill: [y/enter] yes [n/esc] no | Starting tinyverse TUI | never refreshed
+[y/enter] confirm | [n/esc] cancel | Starting tinyverse TUI | never refreshed
