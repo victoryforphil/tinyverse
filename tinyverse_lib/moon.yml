@@ -26,7 +26,7 @@ tasks:
 
   test:
     command: "bun"
-    args: ["./scripts/helpers/test_rust.sh.ts", "-p", "tinyverse_lib"]
+    args: ["./scripts/helpers/test_rust.sh.ts"]
     inputs:
       - "src/**/*"
       - "Cargo.toml"
