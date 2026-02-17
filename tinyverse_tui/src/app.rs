@@ -39,6 +39,7 @@ pub enum FooterHotkeyAction {
     Attach,
     Spawn,
     Kill,
+    SidebarTab,
     FormNextField,
     FormSubmit,
     FormCancel,
@@ -58,6 +59,7 @@ impl FooterHotkeyAction {
             Self::Attach => "a",
             Self::Spawn => "s",
             Self::Kill => "x",
+            Self::SidebarTab => "1-4/lr",
             Self::FormNextField => "tab",
             Self::FormSubmit => "enter",
             Self::FormCancel => "esc",
@@ -77,12 +79,63 @@ impl FooterHotkeyAction {
             Self::Attach => "attach",
             Self::Spawn => "spawn",
             Self::Kill => "kill",
+            Self::SidebarTab => "tabs",
             Self::FormNextField => "next field",
             Self::FormSubmit => "submit",
             Self::FormCancel => "cancel",
             Self::FormEditPrompt => "edit prompt",
             Self::Confirm => "confirm",
             Self::Cancel => "cancel",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SidebarTab {
+    Inspector,
+    Console,
+    Agent,
+    Chat,
+}
+
+impl SidebarTab {
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Inspector => "Inspector",
+            Self::Console => "Console",
+            Self::Agent => "Agent",
+            Self::Chat => "Chat",
+        }
+    }
+
+    pub fn all() -> [Self; 4] {
+        [Self::Inspector, Self::Console, Self::Agent, Self::Chat]
+    }
+
+    pub fn hotkey_index(self) -> usize {
+        match self {
+            Self::Inspector => 1,
+            Self::Console => 2,
+            Self::Agent => 3,
+            Self::Chat => 4,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::Inspector => Self::Console,
+            Self::Console => Self::Agent,
+            Self::Agent => Self::Chat,
+            Self::Chat => Self::Inspector,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            Self::Inspector => Self::Chat,
+            Self::Console => Self::Inspector,
+            Self::Agent => Self::Console,
+            Self::Chat => Self::Agent,
         }
     }
 }
@@ -199,6 +252,8 @@ pub struct LayoutCache {
     pub action_menu_rect: Option<Rect>,
     pub confirm_rect: Option<Rect>,
     pub footer_rect: Option<Rect>,
+    pub sidebar_tab_rects: Vec<(SidebarTab, Rect)>,
+    pub sidebar_preview_rect: Option<Rect>,
     pub overlay: OverlayLayoutCache,
 }
 
@@ -215,6 +270,7 @@ pub struct App {
     pub action_menu_anchor: Option<(u16, u16)>,
     pub input_buffer: String,
     pub spawn_form: SpawnForm,
+    pub sidebar_tab: SidebarTab,
     pub pane_preview_cache: HashMap<String, PanePreview>,
     pub footer_hover_action: Option<FooterHotkeyAction>,
     pub should_quit: bool,
@@ -238,6 +294,7 @@ impl App {
             action_menu_anchor: None,
             input_buffer: String::new(),
             spawn_form: SpawnForm::default(),
+            sidebar_tab: SidebarTab::Inspector,
             pane_preview_cache: HashMap::new(),
             footer_hover_action: None,
             should_quit: false,
@@ -294,6 +351,21 @@ impl App {
         } else {
             self.status_message = String::from("Inspector closed");
         }
+    }
+
+    pub fn next_sidebar_tab(&mut self) {
+        self.sidebar_tab = self.sidebar_tab.next();
+        self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
+    }
+
+    pub fn prev_sidebar_tab(&mut self) {
+        self.sidebar_tab = self.sidebar_tab.prev();
+        self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
+    }
+
+    pub fn set_sidebar_tab(&mut self, tab: SidebarTab) {
+        self.sidebar_tab = tab;
+        self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
     }
 
     pub fn open_action_menu(&mut self) {

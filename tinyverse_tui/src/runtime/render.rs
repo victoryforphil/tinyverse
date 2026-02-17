@@ -4,7 +4,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap};
 
-use crate::app::{App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction};
+use crate::app::{App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction, SidebarTab};
 
 use super::helpers::{anchored_rect, centered_rect, inset_rect, key_hint, line_kv, truncate_to};
 
@@ -196,64 +196,22 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
     }
 }
 
-fn render_inspector(frame: &mut Frame, area: Rect, app: &App) {
+fn render_inspector(frame: &mut Frame, area: Rect, app: &mut App) {
     let block = Block::default()
-        .title(" Inspector ")
+        .title(format!(" {} ", app.sidebar_tab.title()))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Blue));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    if let Some(session) = app.selected_session() {
+    if let Some(session) = app.selected_session().cloned() {
         let inspector_chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(9),
-                Constraint::Min(3),
-                Constraint::Min(3),
-            ])
+            .constraints([Constraint::Length(1), Constraint::Min(3)])
             .split(inner);
 
-        let metadata = vec![
-            line_kv("name", &session.session_name),
-            line_kv("key", &session.session_key),
-            line_kv("agent", &session.agent_type),
-            Line::from(vec![
-                Span::styled("status: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    session.status_string.clone(),
-                    Style::default().fg(status_color(&session.status_string)),
-                ),
-            ]),
-            line_kv("tmux", &session.tmux_session_name),
-            line_kv("console", session.console_pane_id.as_deref().unwrap_or("-")),
-            line_kv(
-                "agent pane",
-                session.agent_pane_id.as_deref().unwrap_or("-"),
-            ),
-            line_kv(
-                "description",
-                session.description.as_deref().unwrap_or("(none)"),
-            ),
-        ];
-        frame.render_widget(
-            Paragraph::new(metadata).wrap(Wrap { trim: true }),
-            inspector_chunks[0],
-        );
-
-        let console_block = Block::default()
-            .title(" Console Preview ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray));
-        let console_inner = console_block.inner(inspector_chunks[1]);
-        frame.render_widget(console_block, inspector_chunks[1]);
-
-        let agent_block = Block::default()
-            .title(" Agent Preview ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray));
-        let agent_inner = agent_block.inner(inspector_chunks[2]);
-        frame.render_widget(agent_block, inspector_chunks[2]);
+        app.layout.sidebar_preview_rect = Some(inspector_chunks[1]);
+        render_sidebar_tabs(frame, app, inspector_chunks[0]);
 
         let preview = app.pane_preview_cache.get(&session.session_key).cloned();
 
@@ -279,15 +237,77 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &App) {
             })
             .unwrap_or_else(|| String::from("Loading agent preview..."));
 
-        frame.render_widget(
-            Paragraph::new(console_preview).style(Style::default().fg(Color::Gray)),
-            console_inner,
-        );
-        frame.render_widget(
-            Paragraph::new(agent_preview).style(Style::default().fg(Color::Gray)),
-            agent_inner,
-        );
+        match app.sidebar_tab {
+            SidebarTab::Inspector => {
+                let metadata = vec![
+                    line_kv("name", &session.session_name),
+                    line_kv("key", &session.session_key),
+                    line_kv("agent", &session.agent_type),
+                    Line::from(vec![
+                        Span::styled("status: ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            session.status_string.clone(),
+                            Style::default().fg(status_color(&session.status_string)),
+                        ),
+                    ]),
+                    line_kv("tmux", &session.tmux_session_name),
+                    line_kv("console", session.console_pane_id.as_deref().unwrap_or("-")),
+                    line_kv(
+                        "agent pane",
+                        session.agent_pane_id.as_deref().unwrap_or("-"),
+                    ),
+                    line_kv(
+                        "description",
+                        session.description.as_deref().unwrap_or("(none)"),
+                    ),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Use 1-4 or left/right to switch tabs.",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                ];
+                frame.render_widget(
+                    Paragraph::new(metadata).wrap(Wrap { trim: true }),
+                    inspector_chunks[1],
+                );
+            }
+            SidebarTab::Console => {
+                let fitted = fit_preview_text(&console_preview, inspector_chunks[1]);
+                frame.render_widget(
+                    Paragraph::new(fitted).style(Style::default().fg(Color::Gray)),
+                    inspector_chunks[1],
+                );
+            }
+            SidebarTab::Agent => {
+                let fitted = fit_preview_text(&agent_preview, inspector_chunks[1]);
+                frame.render_widget(
+                    Paragraph::new(fitted).style(Style::default().fg(Color::Gray)),
+                    inspector_chunks[1],
+                );
+            }
+            SidebarTab::Chat => {
+                let placeholder = vec![
+                    Line::from(Span::styled(
+                        "Chat panel is under construction.",
+                        Style::default().fg(Color::Yellow),
+                    )),
+                    Line::from(""),
+                    Line::from("Planned: threaded notes and prompt scratchpad."),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Switch tabs with 1-4 or left/right.",
+                        Style::default().fg(Color::DarkGray),
+                    )),
+                ];
+                frame.render_widget(
+                    Paragraph::new(placeholder).wrap(Wrap { trim: true }),
+                    inspector_chunks[1],
+                );
+            }
+        }
     } else {
+        app.layout.sidebar_tab_rects.clear();
+        app.layout.sidebar_preview_rect = Some(inner);
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 "No session selected",
@@ -296,6 +316,63 @@ fn render_inspector(frame: &mut Frame, area: Rect, app: &App) {
             inner,
         );
     }
+}
+
+fn render_sidebar_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
+    app.layout.sidebar_tab_rects.clear();
+    let mut spans = Vec::new();
+    let mut cursor_x = area.x;
+    for (index, tab) in SidebarTab::all().iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" ", Style::default().fg(Color::DarkGray)));
+            cursor_x = cursor_x.saturating_add(1);
+        }
+        let style = if *tab == app.sidebar_tab {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        let short = match tab {
+            SidebarTab::Inspector => "Insp",
+            SidebarTab::Console => "Cons",
+            SidebarTab::Agent => "Agent",
+            SidebarTab::Chat => "Chat",
+        };
+        let label = format!(" {}:{} ", tab.hotkey_index(), short);
+        let width = label.chars().count() as u16;
+        app.layout.sidebar_tab_rects.push((
+            *tab,
+            Rect {
+                x: cursor_x,
+                y: area.y,
+                width,
+                height: 1,
+            },
+        ));
+        cursor_x = cursor_x.saturating_add(width);
+        spans.push(Span::styled(label, style));
+    }
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn fit_preview_text(text: &str, area: Rect) -> String {
+    let max_width = area.width.saturating_sub(1) as usize;
+    let max_lines = area.height as usize;
+    if max_width == 0 || max_lines == 0 {
+        return String::new();
+    }
+
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..]
+        .iter()
+        .map(|line| line.chars().take(max_width).collect::<String>())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn render_footer(frame: &mut Frame, area: Rect, app: &App) {
@@ -583,6 +660,7 @@ fn footer_actions_for_mode(mode: AppMode) -> Vec<FooterHotkeyAction> {
         AppMode::Normal => vec![
             FooterHotkeyAction::Quit,
             FooterHotkeyAction::Navigate,
+            FooterHotkeyAction::SidebarTab,
             FooterHotkeyAction::Refresh,
             FooterHotkeyAction::ToggleInspector,
             FooterHotkeyAction::OpenActions,

@@ -13,7 +13,9 @@ use tinyverse_lib::{
     strip_ansi_and_controls,
 };
 
-use crate::app::{App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction, PanePreview};
+use crate::app::{
+    App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction, PanePreview, SidebarTab,
+};
 use crate::prefs::{self, TuiPrefs};
 
 use super::helpers::rect_contains;
@@ -49,16 +51,24 @@ fn handle_key_event(
     match app.mode {
         AppMode::Normal => match key {
             KeyCode::Esc | KeyCode::Char('q') => app.should_quit = true,
-            KeyCode::Up | KeyCode::Char('k') | KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('h') => {
                 app.select_prev();
                 refresh_selected_preview(app);
             }
-            KeyCode::Down | KeyCode::Char('j') | KeyCode::Right | KeyCode::Char('l') => {
+            KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('l') => {
                 app.select_next();
                 refresh_selected_preview(app);
             }
+            KeyCode::Left => app.prev_sidebar_tab(),
+            KeyCode::Right => app.next_sidebar_tab(),
             KeyCode::Char('r') => refresh_sessions_and_preview(app, store)?,
             KeyCode::Char('i') | KeyCode::Tab => app.toggle_inspector(),
+            KeyCode::Char(']') => app.next_sidebar_tab(),
+            KeyCode::Char('[') => app.prev_sidebar_tab(),
+            KeyCode::Char('1') => app.set_sidebar_tab(SidebarTab::Inspector),
+            KeyCode::Char('2') => app.set_sidebar_tab(SidebarTab::Console),
+            KeyCode::Char('3') => app.set_sidebar_tab(SidebarTab::Agent),
+            KeyCode::Char('4') => app.set_sidebar_tab(SidebarTab::Chat),
             KeyCode::Enter => app.open_action_menu(),
             KeyCode::Char('a') => attach_selected_session(terminal, app)?,
             KeyCode::Char('s') => {
@@ -137,6 +147,10 @@ fn handle_key_event(
             KeyCode::Char(c) => app.spawn_form.active_field_mut().push(c),
             _ => {}
         },
+    }
+
+    if app.mode == AppMode::Normal {
+        refresh_selected_preview(app);
     }
 
     Ok(())
@@ -235,6 +249,11 @@ fn handle_mouse_event(
 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(tab) = sidebar_tab_from_position(x, y, app) {
+                app.set_sidebar_tab(tab);
+                refresh_selected_preview(app);
+                return Ok(());
+            }
             if app.inspector_visible && is_near_divider(x, app) {
                 app.dragging_divider = true;
                 return Ok(());
@@ -274,6 +293,13 @@ fn handle_mouse_event(
     }
 
     Ok(())
+}
+
+fn sidebar_tab_from_position(x: u16, y: u16, app: &App) -> Option<SidebarTab> {
+    app.layout
+        .sidebar_tab_rects
+        .iter()
+        .find_map(|(tab, rect)| rect_contains(*rect, x, y).then_some(*tab))
 }
 
 fn execute_menu_action(
@@ -530,29 +556,70 @@ pub(crate) fn refresh_selected_preview(app: &mut App) {
     };
 
     let session_target = SessionTarget::new(session.tmux_session_name);
-
-    let console = {
-        let mut options = CapturePaneOptions::new(session_target.clone());
-        options.pane = Some(PaneTarget::Role(PanelRole::Console));
-        options.start_line = Some(-40);
-        match TmuxClient::new().capture_pane(options) {
-            Ok(captured) => strip_ansi_and_controls(&captured.text),
-            Err(error) => format!("Preview unavailable: {error}"),
+    let fit_size = app.layout.sidebar_preview_rect.and_then(|rect| {
+        if rect.width == 0 || rect.height == 0 {
+            None
+        } else {
+            Some((rect.width, rect.height))
         }
-    };
+    });
+    let client = TmuxClient::new();
 
-    let agent = {
-        let mut options = CapturePaneOptions::new(session_target);
-        options.pane = Some(PaneTarget::Role(PanelRole::Agent));
-        options.start_line = Some(-40);
-        match TmuxClient::new().capture_pane(options) {
-            Ok(captured) => strip_ansi_and_controls(&captured.text),
-            Err(error) => format!("Preview unavailable: {error}"),
-        }
-    };
+    let console = capture_preview_for_role(&client, &session_target, PanelRole::Console, fit_size);
+    let agent = capture_preview_for_role(&client, &session_target, PanelRole::Agent, fit_size);
 
     app.pane_preview_cache
         .insert(session.session_key, PanePreview { console, agent });
+}
+
+fn capture_preview_for_role(
+    client: &TmuxClient,
+    session_target: &SessionTarget,
+    role: PanelRole,
+    fit_size: Option<(u16, u16)>,
+) -> String {
+    let pane_request = PaneTarget::Role(role);
+    let pane_id = match client.resolve_pane_id_for(session_target, Some(&pane_request)) {
+        Ok(id) => id,
+        Err(error) => return format!("Preview unavailable: {error}"),
+    };
+
+    let mut original_size = None;
+    if let Some((fit_width, fit_height)) = fit_size
+        && fit_width > 0
+        && fit_height > 0
+    {
+        original_size = client.pane_size(&pane_id).ok();
+        let _ = client.resize_pane(&pane_id, Some(fit_width), Some(fit_height));
+    }
+
+    let preview_text = {
+        let mut options = CapturePaneOptions::new(session_target.clone());
+        options.pane = Some(PaneTarget::PaneId(pane_id.clone()));
+        options.start_line = Some(-220);
+        options.include_alternate_screen = true;
+        match client.capture_pane(options) {
+            Ok(captured) => strip_ansi_and_controls(&captured.text),
+            Err(error) => format!("Preview unavailable: {error}"),
+        }
+    };
+
+    if let Some((width, height)) = original_size {
+        let _ = client.resize_pane(&pane_id, Some(width), Some(height));
+    }
+
+    if preview_text.trim().is_empty() {
+        let mut fallback = CapturePaneOptions::new(session_target.clone());
+        fallback.pane = Some(PaneTarget::PaneId(pane_id));
+        fallback.start_line = Some(-500);
+        fallback.include_alternate_screen = true;
+        return match client.capture_pane(fallback) {
+            Ok(captured) => strip_ansi_and_controls(&captured.text),
+            Err(_) => preview_text,
+        };
+    }
+
+    preview_text
 }
 
 fn execute_footer_action(
@@ -564,6 +631,7 @@ fn execute_footer_action(
     match action {
         FooterHotkeyAction::Quit => app.should_quit = true,
         FooterHotkeyAction::Navigate => {}
+        FooterHotkeyAction::SidebarTab => app.next_sidebar_tab(),
         FooterHotkeyAction::Refresh => refresh_sessions_and_preview(app, store)?,
         FooterHotkeyAction::ToggleInspector => app.toggle_inspector(),
         FooterHotkeyAction::OpenActions => app.open_action_menu(),
