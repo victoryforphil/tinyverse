@@ -1,0 +1,64 @@
+# Ember — Warm charcoal theme
+#
+# Earthy dark palette with amber/copper highlights.
+# Lower glare than vfp/suchblue, good for long sessions.
+
+# Status pills
+pill_ok_fg = "#D4E4C4"
+pill_ok_bg = "#324028"
+pill_warn_fg = "#1C1410"
+pill_warn_bg = "#CC8822"
+pill_err_fg = "#FFFFFF"
+pill_err_bg = "#B83C30"
+pill_info_fg = "#E4DCD4"
+pill_info_bg = "#2A6060"
+pill_muted_fg = "#8A8078"
+pill_muted_bg = "#2C2824"
+pill_accent_fg = "#1C1410"
+pill_accent_bg = "#CC8822"
+
+# Key hints
+key_hint_key_fg = "#F0E8E0"
+key_hint_key_bg = "#4A4440"
+key_hint_action_fg = "#9A908A"
+key_hint_bracket_fg = "#4A4440"
+
+# Background layers
+base_bg = "#151210"
+surface_bg = "#1C1814"
+
+# Pane borders
+pane_focused_border = "#C87838"
+pane_unfocused_border = "#3A3632"
+
+# Text hierarchy
+text_primary = "#E8E0D8"
+text_secondary = "#A09890"
+text_muted = "#5A5450"
+
+# Selection
+selected_card_bg = "#241E1A"
+
+# Chat
+chat_separator_fg = "#3A3632"
+chat_card_border_fg = "#3A3632"
+chat_header_user_bg = "#2C2824"
+chat_header_agent_bg = "#1E2C2C"
+chat_header_system_bg = "#2C2824"
+chat_collapsible_bg = "#201C18"
+chat_collapsible_focused_bg = "#2C2824"
+chat_collapsible_tag_bg = "#3A3632"
+chat_code_bg = "#181410"
+
+# Path/context badges
+path_pill_fg = "#E4DCD4"
+path_pill_bg = "#2A6060"
+
+# Tree selection/badges
+tree_tint_session = "#241D18"
+tree_tint_console = "#1E1C1A"
+tree_tint_agent = "#2A221C"
+tree_tint_chat = "#1C2422"
+tree_tint_thread = "#201E1A"
+tree_badge_fg = "#8A8078"
+tree_badge_bg = "#2C2824"

@@ -6,7 +6,20 @@
       "model": "openrouter/z-ai/glm-4.7-flash"
     },
     "explore": {
-      "model": "openrouter/x-ai/grok-4.1-fast"
+      "model": "openrouter/x-ai/grok-4.1-fast",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "bash": "allow",
+        "external_directory": {
+          "/Users/alex/repos/vfp/tinyverse": "allow",
+          "/Users/alex/repos/vfp/tinyverse/**": "allow",
+          "/Users/alex/repos/vfp/dark-factory": "allow",
+          "/Users/alex/repos/vfp/dark-factory/**": "allow"
+        }
+      }
     },
     "compaction": {
       "model": "openrouter/google/gemini-3-flash-preview"
@@ -19,6 +32,14 @@
     }
   },
   "mcp": {
+    "perplexity": {
+      "type": "local",
+      "command": ["npx", "-y", "@perplexity-ai/mcp-server"],
+      "enabled": true,
+      "environment": {
+        "PERPLEXITY_API_KEY": "{env:PERPEXTITY_API_KEY}",
+      },
+    },
     "websearch": {
       "type": "remote",
       "url": "https://mcp.exa.ai/mcp?tools=web_search_exa",

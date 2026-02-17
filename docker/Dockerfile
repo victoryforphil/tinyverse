@@ -30,6 +30,7 @@ FROM common AS build
 
 ENV PROTO_HOME=/opt/proto
 ENV PATH="${PROTO_HOME}/bin:${PROTO_HOME}/shims:${PATH}"
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential \

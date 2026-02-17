@@ -22,12 +22,30 @@ key_hint_key_bg = "#373746"
 key_hint_action_fg = "#9696A0"
 key_hint_bracket_fg = "#5A5A6E"
 
+base_bg = "#141414"
+surface_bg = "#1F1F1F"
+
 pane_focused_border = "cyan"
 pane_unfocused_border = "darkgray"
 
 text_primary = "white"
-text_secondary = "gray"
-text_muted = "darkgray"
+text_secondary = "#D2D2D2"
+text_muted = "#B0B0B0"
 
 # Subtle background tint for selected session card body.
 selected_card_bg = "#0C1C20"
+
+chat_card_border_fg = "#5C5C5C"
+chat_header_user_bg = "#362D50"
+chat_header_agent_bg = "#1A4D64"
+chat_header_system_bg = "#4A341D"
+
+path_pill_fg = "#7CD4E8"
+
+tree_tint_session = "#221E18"
+tree_tint_console = "#181C22"
+tree_tint_agent = "#1E1A24"
+tree_tint_chat = "#162020"
+tree_tint_thread = "#181E1C"
+tree_badge_fg = "#787878"
+tree_badge_bg = "#242424"

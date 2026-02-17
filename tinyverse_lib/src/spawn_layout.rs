@@ -21,7 +21,7 @@ impl Default for TmuxSpawnLayout {
             initial_window_height: 64,
             split_direction: SplitDirection::Horizontal,
             primary_role: PanelRole::Agent,
-            secondary_size_percent: 35,
+            secondary_size_percent: 28,
         }
     }
 }

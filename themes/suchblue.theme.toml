@@ -1,0 +1,69 @@
+# SuchBlue — Cool blue monochrome theme
+#
+# Deep navy base with electric blue accents and icy highlights.
+# High contrast, confident, and visually distinctive.
+#
+# Usage:
+#   tinyverse tui --theme suchblue
+#   TINYVERSE_THEME=suchblue tinyverse tui
+#   Copy to ~/.tinyverse/suchblue.theme.toml
+
+# Status pills — blue-shifted spectrum
+pill_ok_fg = "#B8E8D0"
+pill_ok_bg = "#0A2E28"
+pill_warn_fg = "#E6D88C"
+pill_warn_bg = "#2E2A0A"
+pill_err_fg = "#F0A0A0"
+pill_err_bg = "#3C1414"
+pill_info_fg = "#90C8F0"
+pill_info_bg = "#0A1E3C"
+pill_muted_fg = "#7888A0"
+pill_muted_bg = "#1A2030"
+pill_accent_fg = "#A0D0FF"
+pill_accent_bg = "#0A2048"
+
+# Key hints — steel blue chrome
+key_hint_key_fg = "#D0DCE8"
+key_hint_key_bg = "#283848"
+key_hint_action_fg = "#8898B0"
+key_hint_bracket_fg = "#3C4C60"
+
+# Background layers
+base_bg = "#0A0F18"
+surface_bg = "#0C1420"
+
+# Pane borders — electric blue focus
+pane_focused_border = "#3C9EF0"
+pane_unfocused_border = "#2A3848"
+
+# Text hierarchy — cool grays
+text_primary = "#E0E8F0"
+text_secondary = "#98A8B8"
+text_muted = "#506070"
+
+# Selection
+selected_card_bg = "#0C1828"
+
+# Chat — deep blue tones
+chat_separator_fg = "#2A3848"
+chat_card_border_fg = "#2A3848"
+chat_header_user_bg = "#141E2E"
+chat_header_agent_bg = "#0A1E3C"
+chat_header_system_bg = "#181E28"
+chat_collapsible_bg = "#0C1420"
+chat_collapsible_focused_bg = "#141E2E"
+chat_collapsible_tag_bg = "#283848"
+chat_code_bg = "#080E18"
+
+# Path badges — blue accent
+path_pill_fg = "#E0E8F0"
+path_pill_bg = "#0A2048"
+
+# Tree selection/badges
+tree_tint_session = "#1A1620"
+tree_tint_console = "#141C28"
+tree_tint_agent = "#181A30"
+tree_tint_chat = "#122430"
+tree_tint_thread = "#16222A"
+tree_badge_fg = "#7888A0"
+tree_badge_bg = "#1A2030"

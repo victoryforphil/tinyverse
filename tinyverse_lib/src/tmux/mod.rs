@@ -373,10 +373,13 @@ fn build_capture_pane_args(pane_id: &str, options: &CapturePaneOptions) -> Vec<S
     let mut args = vec![
         "capture-pane".to_owned(),
         "-p".to_owned(),
-        "-J".to_owned(),
         "-t".to_owned(),
         pane_id.to_owned(),
     ];
+
+    if options.join_wrapped_lines {
+        args.push("-J".to_owned());
+    }
 
     if options.preserve_ansi {
         args.push("-e".to_owned());
@@ -792,6 +795,7 @@ mod tests {
                 pane: Some(PaneTarget::Role(PanelRole::Console)),
                 start_line: Some(-100),
                 end_line: None,
+                join_wrapped_lines: true,
                 preserve_ansi: false,
                 include_alternate_screen: false,
             })

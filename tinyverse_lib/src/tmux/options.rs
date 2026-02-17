@@ -48,6 +48,7 @@ pub struct CapturePaneOptions {
     pub pane: Option<PaneTarget>,
     pub start_line: Option<i32>,
     pub end_line: Option<i32>,
+    pub join_wrapped_lines: bool,
     pub preserve_ansi: bool,
     pub include_alternate_screen: bool,
 }
@@ -59,6 +60,7 @@ impl CapturePaneOptions {
             pane: None,
             start_line: None,
             end_line: None,
+            join_wrapped_lines: true,
             preserve_ansi: false,
             include_alternate_screen: false,
         }

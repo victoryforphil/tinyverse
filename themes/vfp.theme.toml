@@ -1,0 +1,70 @@
+# VFP — Cyber-sleek dark theme (zsh-style-guide aligned)
+#
+# Ultra-dark base with dual accents:
+# - warm orange for active/warn states
+# - cool cyan-blue for focus/info navigation
+#
+# Usage:
+#   tinyverse tui --theme vfp
+#   TINYVERSE_THEME=vfp tinyverse tui
+#   Copy to ~/.tinyverse/vfp.theme.toml
+
+# Status pills
+pill_ok_fg = "#E4E4E4"
+pill_ok_bg = "#3A5F3A"
+pill_warn_fg = "#1C1C1C"
+pill_warn_bg = "#D78700"
+pill_err_fg = "#FFFFFF"
+pill_err_bg = "#AF3A3A"
+pill_info_fg = "#E4E4E4"
+pill_info_bg = "#005F87"
+pill_muted_fg = "#8A8A8A"
+pill_muted_bg = "#303030"
+pill_accent_fg = "#1C1C1C"
+pill_accent_bg = "#D78700"
+
+# Key hints
+key_hint_key_fg = "#FFFFFF"
+key_hint_key_bg = "#4E4E4E"
+key_hint_action_fg = "#9E9E9E"
+key_hint_bracket_fg = "#4E4E4E"
+
+# Background layers
+base_bg = "#121212"
+surface_bg = "#1A1A1A"
+
+# Pane borders
+pane_focused_border = "#5F87AF"
+pane_unfocused_border = "#3A3A3A"
+
+# Text hierarchy
+text_primary = "#E4E4E4"
+text_secondary = "#D6D6D6"
+text_muted = "#B0B0B0"
+
+# Selection
+selected_card_bg = "#1A2A30"
+
+# Chat
+chat_separator_fg = "#585858"
+chat_card_border_fg = "#5C5C5C"
+chat_header_user_bg = "#362D50"
+chat_header_agent_bg = "#1A4D64"
+chat_header_system_bg = "#4A341D"
+chat_collapsible_bg = "#1C1C1C"
+chat_collapsible_focused_bg = "#2A2A2A"
+chat_collapsible_tag_bg = "#3A3A3A"
+chat_code_bg = "#141414"
+
+# Path/context badges
+path_pill_fg = "#7CD4E8"
+path_pill_bg = "#005F87"
+
+# Tree selection/badges
+tree_tint_session = "#221E18"
+tree_tint_console = "#181C22"
+tree_tint_agent = "#1E1A24"
+tree_tint_chat = "#162020"
+tree_tint_thread = "#181E1C"
+tree_badge_fg = "#787878"
+tree_badge_bg = "#242424"

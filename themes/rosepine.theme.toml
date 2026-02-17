@@ -1,0 +1,70 @@
+# Rosepine — Muted rose and pine theme
+#
+# Inspired by the Rose Pine palette. Soft, low-contrast dark theme
+# with dusty rose highlights and muted pine greens.
+# Pleasant for long late-night sessions.
+#
+# Usage:
+#   tinyverse tui --theme rosepine
+#   TINYVERSE_THEME=rosepine tinyverse tui
+#   Copy to ~/.tinyverse/rosepine.theme.toml
+
+# Status pills — soft botanical tones
+pill_ok_fg = "#9CCCA0"
+pill_ok_bg = "#1A2E24"
+pill_warn_fg = "#E0C080"
+pill_warn_bg = "#302818"
+pill_err_fg = "#E89090"
+pill_err_bg = "#381818"
+pill_info_fg = "#A8B8D0"
+pill_info_bg = "#1A2030"
+pill_muted_fg = "#7E7888"
+pill_muted_bg = "#24202C"
+pill_accent_fg = "#E0A0B8"
+pill_accent_bg = "#30182A"
+
+# Key hints — dusty chrome
+key_hint_key_fg = "#D8D0E0"
+key_hint_key_bg = "#342E40"
+key_hint_action_fg = "#908898"
+key_hint_bracket_fg = "#4A4458"
+
+# Background layers
+base_bg = "#100E18"
+surface_bg = "#161220"
+
+# Pane borders — muted rose focus
+pane_focused_border = "#C87898"
+pane_unfocused_border = "#342E40"
+
+# Text hierarchy — lavender grays
+text_primary = "#E4DCF0"
+text_secondary = "#A89CB0"
+text_muted = "#584E68"
+
+# Selection
+selected_card_bg = "#1A162A"
+
+# Chat — dusky tones
+chat_separator_fg = "#342E40"
+chat_card_border_fg = "#342E40"
+chat_header_user_bg = "#201C2C"
+chat_header_agent_bg = "#1A2030"
+chat_header_system_bg = "#201C2C"
+chat_collapsible_bg = "#161220"
+chat_collapsible_focused_bg = "#201C2C"
+chat_collapsible_tag_bg = "#342E40"
+chat_code_bg = "#120E1C"
+
+# Path badges — rose accent
+path_pill_fg = "#E4DCF0"
+path_pill_bg = "#30182A"
+
+# Tree selection/badges
+tree_tint_session = "#241C2A"
+tree_tint_console = "#1C1A28"
+tree_tint_agent = "#261C30"
+tree_tint_chat = "#1A202A"
+tree_tint_thread = "#201A24"
+tree_badge_fg = "#7E7888"
+tree_badge_bg = "#24202C"
