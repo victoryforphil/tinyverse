@@ -1,5 +1,6 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use serde_json::Value;
 
 use crate::app::App;
 use crate::chat::ChatMessagePart;
@@ -9,6 +10,14 @@ use crate::runtime::helpers::truncate_to;
 
 const EXPANDED_LINE_CAP: usize = 120;
 const TRUNCATED_HINT: &str = "    ... (press enter for full detail)";
+const TODO_RENDER_CAP: usize = 24;
+
+#[derive(Debug, Clone)]
+struct TodoRenderItem {
+    content: String,
+    status: String,
+    priority: String,
+}
 
 fn collapsible_header(
     label: &str,
@@ -192,9 +201,17 @@ pub(super) fn render_chat_part_lines(
             input,
             output,
         } => {
+            let is_todo_tool = name.eq_ignore_ascii_case("todowrite");
+            let header_label = if is_todo_tool {
+                String::from("todo list update")
+            } else {
+                format!("tool {name}")
+            };
+            let header_tag = if is_todo_tool { "todo" } else { "tool" };
+
             let mut out = vec![collapsible_header(
-                &format!("tool {name}"),
-                "tool",
+                &header_label,
+                header_tag,
                 expanded,
                 app.theme.pill_info_fg,
                 width,
@@ -204,19 +221,108 @@ pub(super) fn render_chat_part_lines(
             )];
 
             if !expanded {
-                let preview = input
-                    .as_deref()
-                    .and_then(first_meaningful_line)
-                    .or_else(|| output.as_deref().and_then(first_meaningful_line))
-                    .unwrap_or("(details)");
+                let preview = if is_todo_tool {
+                    output
+                        .as_deref()
+                        .and_then(parse_todo_items)
+                        .or_else(|| input.as_deref().and_then(parse_todo_items))
+                        .map(|todos| todo_preview_label(&todos))
+                        .or_else(|| input.as_deref().and_then(first_meaningful_line).map(str::to_owned))
+                        .or_else(|| output.as_deref().and_then(first_meaningful_line).map(str::to_owned))
+                        .unwrap_or_else(|| String::from("todo state update"))
+                } else {
+                    input
+                        .as_deref()
+                        .and_then(first_meaningful_line)
+                        .or_else(|| output.as_deref().and_then(first_meaningful_line))
+                        .unwrap_or("(details)")
+                        .to_owned()
+                };
                 out.push(RenderedChatLine {
                     line: line_with_path_pills(
-                        &format!("    {}", truncate_to(preview, max)),
+                        &format!("    {}", truncate_to(&preview, max)),
                         Style::default().fg(app.theme.text_muted),
                         app,
                     ),
                     toggle_key: None,
                 });
+                return out;
+            }
+
+            if is_todo_tool {
+                if let Some(input) = input {
+                    out.push(RenderedChatLine {
+                        line: Line::from(vec![
+                            Span::styled(
+                                " IN ",
+                                Style::default()
+                                    .fg(app.theme.pill_muted_fg)
+                                    .bg(app.theme.pill_muted_bg)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(" ", Style::default()),
+                        ]),
+                        toggle_key: None,
+                    });
+
+                    if let Some(items) = parse_todo_items(input) {
+                        out.extend(render_todo_items(&items, max, app));
+                    } else {
+                        let mut count = 0usize;
+                        for line in input.lines() {
+                            if count >= EXPANDED_LINE_CAP / 2 {
+                                out.push(truncated_hint_line(app));
+                                break;
+                            }
+                            out.push(RenderedChatLine {
+                                line: line_with_path_pills(
+                                    &format!("      {}", truncate_to(line, max)),
+                                    Style::default().fg(app.theme.text_muted),
+                                    app,
+                                ),
+                                toggle_key: None,
+                            });
+                            count += 1;
+                        }
+                    }
+                }
+
+                if let Some(output) = output {
+                    out.push(RenderedChatLine {
+                        line: Line::from(vec![
+                            Span::styled(
+                                " OUT ",
+                                Style::default()
+                                    .fg(app.theme.pill_muted_fg)
+                                    .bg(app.theme.pill_muted_bg)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(" ", Style::default()),
+                        ]),
+                        toggle_key: None,
+                    });
+
+                    if let Some(items) = parse_todo_items(output) {
+                        out.extend(render_todo_items(&items, max, app));
+                    } else {
+                        let mut count = 0usize;
+                        for line in output.lines() {
+                            if count >= EXPANDED_LINE_CAP {
+                                out.push(truncated_hint_line(app));
+                                break;
+                            }
+                            out.push(RenderedChatLine {
+                                line: line_with_path_pills(
+                                    &format!("      {}", truncate_to(line, max)),
+                                    Style::default().fg(app.theme.text_secondary),
+                                    app,
+                                ),
+                                toggle_key: None,
+                            });
+                            count += 1;
+                        }
+                    }
+                }
                 return out;
             }
 
@@ -583,10 +689,233 @@ fn first_meaningful_line(value: &str) -> Option<&str> {
         .find(|line| !line.is_empty() && !line.starts_with('{') && !line.starts_with('['))
 }
 
+fn parse_todo_items(raw: &str) -> Option<Vec<TodoRenderItem>> {
+    let payload = serde_json::from_str::<Value>(raw).ok()?;
+    let list = if let Some(value) = payload.get("todos") {
+        value.as_array()?
+    } else {
+        payload.as_array()?
+    };
+
+    let mut items = Vec::new();
+    for entry in list {
+        let Some(object) = entry.as_object() else {
+            continue;
+        };
+        let content = object
+            .get("content")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .trim();
+        if content.is_empty() {
+            continue;
+        }
+
+        let status = object
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("pending")
+            .trim()
+            .to_ascii_lowercase();
+        let priority = object
+            .get("priority")
+            .and_then(Value::as_str)
+            .unwrap_or("medium")
+            .trim()
+            .to_ascii_lowercase();
+
+        items.push(TodoRenderItem {
+            content: content.to_owned(),
+            status,
+            priority,
+        });
+    }
+
+    if items.is_empty() { None } else { Some(items) }
+}
+
+fn todo_preview_label(items: &[TodoRenderItem]) -> String {
+    let total = items.len();
+    let completed = items
+        .iter()
+        .filter(|item| item.status.eq_ignore_ascii_case("completed"))
+        .count();
+    let in_progress = items
+        .iter()
+        .filter(|item| item.status.eq_ignore_ascii_case("in_progress"))
+        .count();
+
+    if completed == total {
+        return format!("{total} todos completed");
+    }
+    if in_progress > 0 {
+        return format!("{total} todos ({completed} done, {in_progress} active)");
+    }
+    format!("{total} todos ({completed} done)")
+}
+
+fn render_todo_items(items: &[TodoRenderItem], max: usize, app: &App) -> Vec<RenderedChatLine> {
+    let mut out = Vec::new();
+    out.push(RenderedChatLine {
+        line: Line::from(Span::styled(
+            format!("      {}", todo_preview_label(items)),
+            Style::default().fg(app.theme.text_muted),
+        )),
+        toggle_key: None,
+    });
+
+    for item in items.iter().take(TODO_RENDER_CAP) {
+        let status_label = todo_status_label(&item.status);
+        let priority_label = todo_priority_label(&item.priority);
+        let marker = todo_status_marker(&item.status);
+
+        let tag_budget = status_label.chars().count() + priority_label.chars().count() + 16;
+        let content_budget = max.saturating_sub(tag_budget).max(12);
+        let content = truncate_to(item.content.trim(), content_budget);
+
+        let marker_style = Style::default()
+            .fg(todo_status_fg(&item.status, app))
+            .add_modifier(Modifier::BOLD);
+        let text_style = if item.status.eq_ignore_ascii_case("completed")
+            || item.status.eq_ignore_ascii_case("cancelled")
+        {
+            Style::default().fg(app.theme.text_muted)
+        } else {
+            Style::default().fg(app.theme.text_secondary)
+        };
+        let status_tag_style = Style::default()
+            .fg(todo_status_fg(&item.status, app))
+            .bg(app.theme.pill_muted_bg)
+            .add_modifier(Modifier::BOLD);
+        let (priority_fg, priority_bg) = todo_priority_colors(&item.priority, app);
+        let priority_tag_style = Style::default()
+            .fg(priority_fg)
+            .bg(priority_bg)
+            .add_modifier(Modifier::BOLD);
+
+        out.push(RenderedChatLine {
+            line: Line::from(vec![
+                Span::styled(format!("      {marker} "), marker_style),
+                Span::styled(content, text_style),
+                Span::raw("  "),
+                Span::styled(format!(" {status_label} "), status_tag_style),
+                Span::raw(" "),
+                Span::styled(format!(" {priority_label} "), priority_tag_style),
+            ]),
+            toggle_key: None,
+        });
+    }
+
+    if items.len() > TODO_RENDER_CAP {
+        out.push(RenderedChatLine {
+            line: Line::from(Span::styled(
+                format!(
+                    "      ... {} more todos",
+                    items.len().saturating_sub(TODO_RENDER_CAP)
+                ),
+                Style::default().fg(app.theme.text_muted),
+            )),
+            toggle_key: None,
+        });
+    }
+
+    out
+}
+
+fn todo_status_marker(status: &str) -> &'static str {
+    if status.eq_ignore_ascii_case("completed") {
+        "[x]"
+    } else if status.eq_ignore_ascii_case("in_progress") {
+        "[~]"
+    } else if status.eq_ignore_ascii_case("cancelled") {
+        "[-]"
+    } else {
+        "[ ]"
+    }
+}
+
+fn todo_status_label(status: &str) -> &'static str {
+    if status.eq_ignore_ascii_case("completed") {
+        "completed"
+    } else if status.eq_ignore_ascii_case("in_progress") {
+        "active"
+    } else if status.eq_ignore_ascii_case("cancelled") {
+        "cancelled"
+    } else {
+        "pending"
+    }
+}
+
+fn todo_status_fg(status: &str, app: &App) -> Color {
+    if status.eq_ignore_ascii_case("completed") {
+        app.theme.pill_ok_fg
+    } else if status.eq_ignore_ascii_case("in_progress") {
+        app.theme.pill_info_fg
+    } else if status.eq_ignore_ascii_case("cancelled") {
+        app.theme.text_muted
+    } else {
+        app.theme.pill_warn_fg
+    }
+}
+
+fn todo_priority_label(priority: &str) -> &'static str {
+    if priority.eq_ignore_ascii_case("high") {
+        "high"
+    } else if priority.eq_ignore_ascii_case("low") {
+        "low"
+    } else {
+        "medium"
+    }
+}
+
+fn todo_priority_colors(priority: &str, app: &App) -> (Color, Color) {
+    if priority.eq_ignore_ascii_case("high") {
+        (app.theme.pill_err_fg, app.theme.pill_err_bg)
+    } else if priority.eq_ignore_ascii_case("low") {
+        (app.theme.pill_info_fg, app.theme.pill_info_bg)
+    } else {
+        (app.theme.pill_warn_fg, app.theme.pill_warn_bg)
+    }
+}
+
 fn is_hidden_noise_line(value: &str) -> bool {
     let trimmed = value.trim_start();
     trimmed.starts_with("step finished |")
         || trimmed.starts_with("shell metadata:")
         || trimmed.starts_with("shell call:")
         || trimmed.starts_with("shell status:")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_todo_items, todo_preview_label};
+
+    #[test]
+    fn parses_todo_envelope_payload() {
+        let payload =
+            r#"{"todos":[{"content":"Write docs","status":"in_progress","priority":"high"}]}"#;
+        let items = parse_todo_items(payload).expect("expected todo list");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].content, "Write docs");
+        assert_eq!(items[0].status, "in_progress");
+        assert_eq!(items[0].priority, "high");
+    }
+
+    #[test]
+    fn parses_todo_array_payload() {
+        let payload = r#"[{"content":"Ship feature","status":"completed","priority":"medium"}]"#;
+        let items = parse_todo_items(payload).expect("expected todo list");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].content, "Ship feature");
+        assert_eq!(items[0].status, "completed");
+        assert_eq!(items[0].priority, "medium");
+    }
+
+    #[test]
+    fn formats_todo_preview_summary() {
+        let payload =
+            r#"[{"content":"A","status":"completed","priority":"high"},{"content":"B","status":"completed","priority":"low"}]"#;
+        let items = parse_todo_items(payload).expect("expected todo list");
+        assert_eq!(todo_preview_label(&items), "2 todos completed");
+    }
 }
