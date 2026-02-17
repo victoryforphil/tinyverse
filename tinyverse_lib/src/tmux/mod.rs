@@ -17,6 +17,7 @@ pub use types::{
 const LIST_SESSIONS_FORMAT: &str =
     "#{session_id}\t#{session_name}\t#{session_attached}\t#{session_windows}";
 const LIST_PANES_FORMAT: &str = "#{pane_id}\t#{pane_index}\t#{pane_title}";
+const TMUX_LITERAL_CHUNK_BYTES: usize = 512;
 
 #[derive(Debug, Clone)]
 pub struct TmuxClient {
@@ -212,6 +213,10 @@ impl TmuxClient {
             args.push("-e".to_owned());
         }
 
+        if options.include_alternate_screen {
+            args.push("-a".to_owned());
+        }
+
         if let Some(start_line) = options.start_line {
             args.push("-S".to_owned());
             args.push(start_line.to_string());
@@ -236,6 +241,53 @@ impl TmuxClient {
         self.send_literal_to_target(&pane_id, &options.command, options.press_enter)
     }
 
+    pub fn resolve_pane_id_for(
+        &self,
+        session: &SessionTarget,
+        request: Option<&PaneTarget>,
+    ) -> Result<String, TmuxError> {
+        self.resolve_pane_id(session, request)
+    }
+
+    pub fn pane_size(&self, pane_id: &str) -> Result<(u16, u16), TmuxError> {
+        let output = self.run_tmux(vec![
+            "display-message".to_owned(),
+            "-p".to_owned(),
+            "-t".to_owned(),
+            pane_id.to_owned(),
+            "#{pane_width}\t#{pane_height}".to_owned(),
+        ])?;
+
+        parse_pane_size_output(&output)
+    }
+
+    pub fn resize_pane(
+        &self,
+        pane_id: &str,
+        width: Option<u16>,
+        height: Option<u16>,
+    ) -> Result<(), TmuxError> {
+        if width.is_none() && height.is_none() {
+            return Ok(());
+        }
+
+        let mut args = vec![
+            "resize-pane".to_owned(),
+            "-t".to_owned(),
+            pane_id.to_owned(),
+        ];
+        if let Some(value) = width {
+            args.push("-x".to_owned());
+            args.push(value.to_string());
+        }
+        if let Some(value) = height {
+            args.push("-y".to_owned());
+            args.push(value.to_string());
+        }
+        self.run_tmux(args)?;
+        Ok(())
+    }
+
     fn send_literal_to_target(
         &self,
         pane_target: &str,
@@ -247,13 +299,15 @@ impl TmuxClient {
         }
 
         if !command.is_empty() {
-            self.run_tmux(vec![
-                "send-keys".to_owned(),
-                "-t".to_owned(),
-                pane_target.to_owned(),
-                "-l".to_owned(),
-                command.to_owned(),
-            ])?;
+            for chunk in split_literal_chunks(command, TMUX_LITERAL_CHUNK_BYTES) {
+                self.run_tmux(vec![
+                    "send-keys".to_owned(),
+                    "-t".to_owned(),
+                    pane_target.to_owned(),
+                    "-l".to_owned(),
+                    chunk.to_owned(),
+                ])?;
+            }
         }
 
         if press_enter {
@@ -448,6 +502,42 @@ fn parse_list_panes_output(output: &str) -> Result<Vec<PaneSummary>, TmuxError> 
         .collect()
 }
 
+fn parse_pane_size_output(output: &str) -> Result<(u16, u16), TmuxError> {
+    let trimmed = output.trim();
+    let mut parts = trimmed.split('\t');
+    let Some(width_raw) = parts.next() else {
+        return Err(TmuxError::ParseOutput {
+            command: "display-message",
+            details: "missing pane width".to_owned(),
+            output: output.to_owned(),
+        });
+    };
+    let Some(height_raw) = parts.next() else {
+        return Err(TmuxError::ParseOutput {
+            command: "display-message",
+            details: "missing pane height".to_owned(),
+            output: output.to_owned(),
+        });
+    };
+
+    let width = width_raw
+        .parse::<u16>()
+        .map_err(|_| TmuxError::ParseOutput {
+            command: "display-message",
+            details: "invalid pane width".to_owned(),
+            output: output.to_owned(),
+        })?;
+    let height = height_raw
+        .parse::<u16>()
+        .map_err(|_| TmuxError::ParseOutput {
+            command: "display-message",
+            details: "invalid pane height".to_owned(),
+            output: output.to_owned(),
+        })?;
+
+    Ok((width, height))
+}
+
 fn resolve_pane_from_summaries(
     panes: &[PaneSummary],
     request: Option<&PaneTarget>,
@@ -505,6 +595,32 @@ fn shell_quote(arg: &str) -> String {
     format!("\"{escaped}\"")
 }
 
+fn split_literal_chunks(input: &str, max_bytes: usize) -> Vec<&str> {
+    if input.is_empty() {
+        return Vec::new();
+    }
+
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let len = input.len();
+
+    while start < len {
+        let mut end = (start + max_bytes).min(len);
+        while end > start && !input.is_char_boundary(end) {
+            end -= 1;
+        }
+
+        if end == start {
+            end = len;
+        }
+
+        chunks.push(&input[start..end]);
+        start = end;
+    }
+
+    chunks
+}
+
 fn bytes_to_clean_string(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).trim_end().to_owned()
 }
@@ -517,7 +633,7 @@ mod tests {
         CapturePaneOptions, LIST_PANES_FORMAT, LIST_SESSIONS_FORMAT, ListSessionsOptions,
         PaneSummary, PaneTarget, PanelRole, SendKeysOptions, SessionTarget, SpawnSessionOptions,
         TmuxClient, TmuxError, format_command, parse_list_panes_output, parse_list_sessions_output,
-        resolve_pane_from_summaries,
+        parse_pane_size_output, resolve_pane_from_summaries, split_literal_chunks,
     };
 
     #[test]
@@ -598,6 +714,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_pane_size_output_parses_dimensions() {
+        let parsed = parse_pane_size_output("132\t48").expect("should parse pane dimensions");
+        assert_eq!(parsed, (132, 48));
+    }
+
+    #[test]
+    fn parse_pane_size_output_rejects_invalid_dimensions() {
+        let error = parse_pane_size_output("wide\ttall").expect_err("should reject invalid output");
+        assert!(matches!(error, TmuxError::ParseOutput { .. }));
+    }
+
+    #[test]
+    fn split_literal_chunks_preserves_content_and_boundaries() {
+        let source = "alpha🙂beta\ngamma";
+        let chunks = split_literal_chunks(source, 5);
+
+        assert!(!chunks.is_empty());
+        assert!(chunks.iter().all(|chunk| chunk.len() <= 5));
+        assert_eq!(chunks.concat(), source);
+    }
+
+    #[test]
     #[ignore]
     fn integration_spawn_send_capture_kill() {
         if std::process::Command::new("tmux")
@@ -638,6 +776,7 @@ mod tests {
                 start_line: Some(-100),
                 end_line: None,
                 preserve_ansi: false,
+                include_alternate_screen: false,
             })
             .expect("capture should succeed");
 

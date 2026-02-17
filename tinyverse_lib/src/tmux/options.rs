@@ -49,6 +49,7 @@ pub struct CapturePaneOptions {
     pub start_line: Option<i32>,
     pub end_line: Option<i32>,
     pub preserve_ansi: bool,
+    pub include_alternate_screen: bool,
 }
 
 impl CapturePaneOptions {
@@ -59,6 +60,7 @@ impl CapturePaneOptions {
             start_line: None,
             end_line: None,
             preserve_ansi: false,
+            include_alternate_screen: false,
         }
     }
 }
