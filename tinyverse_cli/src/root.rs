@@ -5,17 +5,16 @@ use tinyverse_lib::TINYVERSE_DIR_HOME_ENV;
 
 use crate::commands::{
     attach::args::AttachArgs, config::command::ConfigCommands, debug::args::DebugCommands,
-    detach::args::DetachArgs, kill::args::KillArgs, list::args::ListArgs,
-    prompt::args::PromptCommands, send::args::SendArgs, spawn::args::SpawnArgs, tui::args::TuiArgs,
-    view::args::ViewArgs,
+    detach::args::DetachArgs, gha_babysit::args::GhaBabysitArgs, kill::args::KillArgs,
+    list::args::ListArgs, prompt::args::PromptCommands, send::args::SendArgs,
+    spawn::args::SpawnArgs, tui::args::TuiArgs, view::args::ViewArgs,
 };
 
 #[derive(Debug, Parser)]
 #[command(
     name = "tinyverse",
     version,
-    about = "tmux-based agent session harness",
-    arg_required_else_help = true
+    about = "tmux-based agent session harness"
 )]
 pub struct Cli {
     /// Override tinyverse home directory (or a directory containing .tinyverse)
@@ -23,7 +22,7 @@ pub struct Cli {
     pub tinyverse_dir_home: Option<PathBuf>,
 
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -58,6 +57,9 @@ pub enum Commands {
     Send(SendArgs),
     /// Launch the interactive TUI dashboard
     Tui(TuiArgs),
+    /// Print the GitHub Actions fix/push/watch loop playbook
+    #[command(name = "gha-babysit")]
+    GhaBabysit(GhaBabysitArgs),
     /// Debugging utilities
     Debug {
         #[command(subcommand)]

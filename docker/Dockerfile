@@ -29,10 +29,13 @@ WORKDIR /workspace
 FROM common AS build
 
 ENV PROTO_HOME=/opt/proto
-ENV PATH="${PROTO_HOME}/bin:${PROTO_HOME}/shims:${PATH}"
+ENV CARGO_HOME=/opt/cargo
+ENV RUSTUP_HOME=/opt/rustup
+ENV PATH="${CARGO_HOME}/bin:${PROTO_HOME}/bin:${PROTO_HOME}/shims:${PATH}"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential \
+  libsqlite3-dev \
   libssl-dev \
   pkg-config \
   sqlite3 \
@@ -41,6 +44,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN mkdir -p "${PROTO_HOME}" \
   && curl -fsSL https://moonrepo.dev/install/proto.sh | bash -s -- --yes --no-profile
+
+RUN mkdir -p "${CARGO_HOME}" "${RUSTUP_HOME}" \
+  && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
 
 COPY .prototools /workspace/.prototools
 RUN proto install

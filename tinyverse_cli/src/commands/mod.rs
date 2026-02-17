@@ -2,6 +2,7 @@ pub mod attach;
 pub mod config;
 pub mod debug;
 pub mod detach;
+pub mod gha_babysit;
 pub mod kill;
 pub mod list;
 pub mod output;

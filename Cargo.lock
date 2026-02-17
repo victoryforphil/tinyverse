@@ -760,6 +760,7 @@ version = "0.35.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f"
 dependencies = [
+ "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -1424,6 +1425,7 @@ dependencies = [
  "crossterm 0.28.1",
  "diesel",
  "diesel_migrations",
+ "libsqlite3-sys",
  "log",
  "nu-ansi-term",
  "pretty_env_logger",
@@ -1437,7 +1439,9 @@ name = "tinyverse_tui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "crossterm 0.29.0",
+ "insta",
  "ratatui",
  "tinyverse_lib",
 ]
