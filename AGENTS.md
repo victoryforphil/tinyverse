@@ -46,6 +46,8 @@ Testing preference:
 Operational commands:
 - Install Moon project dependencies: `moon :install`
 - Run Moon Rust checks/tests: `moon run tinyverse_cli:check`, `moon run tinyverse_cli:test`
+- Run timestamped insta review capture: `scripts/insta_review.sh.ts -p tinyverse_ui`
+- Render captured snapshot A/B view: `scripts/render_snapshot_review.sh.ts [timestamp]`
 - Dispatch scraper: `scripts/scrapes/scrape_docs.sh.ts <source> [output_dir]`
 - Run scraper directly: `scripts/scrapes/scrape_<source>_docs.sh.ts [output_dir]`
 - Diesel scraper: `scripts/scrapes/scrape_docs.sh.ts diesel [output_dir]`
