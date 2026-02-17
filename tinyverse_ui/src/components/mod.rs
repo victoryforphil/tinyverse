@@ -15,5 +15,5 @@ pub use guidance_line::GuidanceLine;
 pub use labeled_field::LabeledField;
 pub use section_header::SectionHeader;
 pub use status_badge::StatusBadge;
-pub use styled_table::StyledTable;
+pub use styled_table::{ColumnAlignment, StripeMode, StyledTable};
 pub use summary_footer::SummaryFooter;

@@ -1,5 +1,6 @@
 use nu_ansi_term::{Color, Style};
 
+/// Semantic output tone used by badges and action lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     Neutral,
@@ -9,14 +10,20 @@ pub enum Tone {
     Error,
 }
 
+/// Maps semantic presentation roles to concrete ANSI styles.
 pub trait Theme {
     fn section_header_style(&self) -> Style;
     fn label_style(&self) -> Style;
     fn guidance_style(&self) -> Style;
+    fn summary_style(&self) -> Style;
+    fn table_header_style(&self) -> Style;
+    fn table_stripe_style(&self) -> Style;
+    fn dim_style(&self) -> Style;
     fn tone_badge_style(&self, tone: Tone) -> Style;
     fn tone_text_style(&self, tone: Tone) -> Style;
 }
 
+/// Default colorful tinyverse theme for terminal output.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DefaultTheme;
 
@@ -31,6 +38,22 @@ impl Theme for DefaultTheme {
 
     fn guidance_style(&self) -> Style {
         Style::new().fg(Color::Green)
+    }
+
+    fn summary_style(&self) -> Style {
+        Style::new().fg(Color::Cyan)
+    }
+
+    fn table_header_style(&self) -> Style {
+        Style::new().bold()
+    }
+
+    fn table_stripe_style(&self) -> Style {
+        Style::new().dimmed()
+    }
+
+    fn dim_style(&self) -> Style {
+        Style::new().dimmed()
     }
 
     fn tone_badge_style(&self, tone: Tone) -> Style {
@@ -51,5 +74,47 @@ impl Theme for DefaultTheme {
             Tone::Warning => Style::new().fg(Color::Yellow),
             Tone::Error => Style::new().fg(Color::Red).bold(),
         }
+    }
+}
+
+/// Minimal mostly monochrome theme for low-noise output.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct MinimalTheme;
+
+impl Theme for MinimalTheme {
+    fn section_header_style(&self) -> Style {
+        Style::new().bold()
+    }
+
+    fn label_style(&self) -> Style {
+        Style::new().bold()
+    }
+
+    fn guidance_style(&self) -> Style {
+        Style::new().bold()
+    }
+
+    fn summary_style(&self) -> Style {
+        Style::new().bold()
+    }
+
+    fn table_header_style(&self) -> Style {
+        Style::new().bold()
+    }
+
+    fn table_stripe_style(&self) -> Style {
+        Style::new()
+    }
+
+    fn dim_style(&self) -> Style {
+        Style::new()
+    }
+
+    fn tone_badge_style(&self, _tone: Tone) -> Style {
+        Style::new().bold()
+    }
+
+    fn tone_text_style(&self, _tone: Tone) -> Style {
+        Style::new()
     }
 }

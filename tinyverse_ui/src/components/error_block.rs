@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::components::GuidanceLine;
-use crate::render::RenderContext;
+use crate::render::{RenderContext, RenderMode};
 use crate::theme::Tone;
 
 use super::ActionLine;
@@ -42,7 +42,13 @@ impl<'a> ErrorBlock<'a> {
             .render(context),
         );
         if let Some(detail) = &self.detail {
-            lines.push(format!("  {detail}"));
+            match context.mode {
+                RenderMode::Plain => lines.push(format!("  {detail}")),
+                RenderMode::Ansi => {
+                    let styled = context.theme.dim_style().paint(detail.as_ref());
+                    lines.push(format!("  {styled}"));
+                }
+            }
         }
         if let Some(guidance) = &self.guidance {
             lines.push(

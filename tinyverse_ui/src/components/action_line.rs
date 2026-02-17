@@ -11,6 +11,18 @@ pub struct ActionLine<'a> {
 }
 
 impl<'a> ActionLine<'a> {
+    pub fn new(
+        label: impl Into<Cow<'a, str>>,
+        message: impl Into<Cow<'a, str>>,
+        tone: Tone,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            message: message.into(),
+            tone,
+        }
+    }
+
     pub fn render(&self, context: &RenderContext<'_>) -> String {
         let badge_text = pad_right(&self.label, 7);
         match context.mode {
