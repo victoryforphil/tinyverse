@@ -12,10 +12,6 @@ pub fn execute(args: KillArgs) -> Result<()> {
         .kill_session(target.clone())
         .with_context(|| format!("failed to kill session `{}`", target.as_str()))?;
 
-    info!(
-        "CLI // Sessions // Killed session (meta={{\"session\":\"{}\"}})",
-        args.session
-    );
-    println!("Killed session {}", args.session);
+    info!("Killed session {}", args.session);
     Ok(())
 }

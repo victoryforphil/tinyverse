@@ -66,7 +66,42 @@ impl Provider for OpencodeProvider {
     }
 
     fn launch_args_template(&self) -> &'static str {
-        "{args} {prompt}"
+        "--prompt {prompt} {args}"
+    }
+
+    fn build_launch_command(&self, context: LaunchContext<'_>) -> String {
+        let rendered_user_args = context.args.map(|value| {
+            render_template(
+                value,
+                LaunchContext {
+                    args: None,
+                    ..context
+                },
+            )
+        });
+
+        let rendered_prompt = context.prompt.map(shell_escape);
+        let prompt_in_user_args = context
+            .args
+            .map(|value| value.contains("{prompt}"))
+            .unwrap_or(false);
+
+        let mut parts = vec![self.launch_command_template().to_owned()];
+        if let Some(prompt) = rendered_prompt {
+            if !prompt_in_user_args {
+                parts.push("--prompt".to_owned());
+                parts.push(prompt);
+            }
+        }
+
+        if let Some(args) = rendered_user_args {
+            let trimmed = args.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_owned());
+            }
+        }
+
+        parts.join(" ")
     }
 }
 
@@ -147,7 +182,7 @@ mod tests {
             args: None,
         });
 
-        assert_eq!(command, "opencode \"run tests\"");
+        assert_eq!(command, "opencode --prompt \"run tests\"");
     }
 
     #[test]
@@ -159,10 +194,7 @@ mod tests {
             args: Some("--prompt {prompt} --model {model}"),
         });
 
-        assert_eq!(
-            command,
-            "opencode --prompt \"triage bug\" --model \"fast\" \"triage bug\""
-        );
+        assert_eq!(command, "opencode --prompt \"triage bug\" --model \"fast\"");
     }
 
     #[test]

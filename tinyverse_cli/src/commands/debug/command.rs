@@ -41,14 +41,10 @@ fn execute_self(args: DebugSelfArgs) -> Result<()> {
 
     let report = build_report(session, current_pane, panes);
 
-    info!(
-        "CLI // Debug // Self inspection complete (meta={{\"in_tmux\":{},\"pane_count\":{}}})",
-        report.in_tmux,
-        report.panes.len()
-    );
+    info!("Collected debug info ({} pane(s))", report.panes.len());
 
     let rendered = render_output(&report, args.format, format_text_report, format_text_report)?;
-    println!("{rendered}");
+    info!("{rendered}");
 
     Ok(())
 }

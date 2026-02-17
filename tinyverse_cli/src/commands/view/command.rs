@@ -19,10 +19,10 @@ pub fn execute(args: ViewArgs) -> Result<()> {
         .with_context(|| format!("failed to capture pane for session `{}`", session.as_str()))?;
 
     info!(
-        "CLI // Sessions // Captured pane (meta={{\"session\":\"{}\",\"pane_id\":\"{}\"}})",
-        captured.session, captured.pane_id
+        "Captured pane {} from session {}",
+        captured.pane_id, captured.session
     );
 
-    println!("{}", captured.text);
+    info!("{}", captured.text);
     Ok(())
 }

@@ -51,10 +51,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
             .collect(),
     };
 
-    info!(
-        "CLI // Sessions // Listed sessions (meta={{\"showing_all\":{},\"count\":{},\"total\":{}}})",
-        report.showing_all, report.returned_sessions, report.total_sessions
-    );
+    info!("Found {} session(s)", report.returned_sessions);
 
     let output = render_output(
         &report,
@@ -62,7 +59,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
         format_table_report,
         format_text_report,
     )?;
-    println!("{output}");
+    info!("{output}");
 
     Ok(())
 }
@@ -73,7 +70,7 @@ fn format_text_report(report: &ListReport) -> String {
             "No sessions found.".to_owned()
         } else {
             format!(
-                "No tinyverse sessions found (prefix={TINYVERSE_SESSION_PREFIX}). Use --all to include every tmux session."
+                "No tinyverse sessions found (prefix={TINYVERSE_SESSION_PREFIX}).\nUse --all to include every tmux session."
             )
         };
     }

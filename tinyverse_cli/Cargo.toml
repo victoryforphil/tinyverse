@@ -7,9 +7,12 @@ edition = "2024"
 anyhow = { version = "1.0.101", features = ["backtrace"] }
 clap = { version = "4.5.59", features = ["derive", "env"] }
 log = "0.4.29"
-pretty_env_logger = "0.5.0"
+nu-ansi-term = "0.50.3"
 prettytable-rs = "0.10.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tinyverse_lib = { path = "../tinyverse_lib" }
 toml = "1.0.2"
+tracing = { version = "0.1.44", features = ["log"] }
+tracing-log = "0.2.0"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }

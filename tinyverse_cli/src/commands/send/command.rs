@@ -17,10 +17,6 @@ pub fn execute(args: SendArgs) -> Result<()> {
         .send_keys(options)
         .with_context(|| format!("failed to send command to session `{}`", session.as_str()))?;
 
-    info!(
-        "CLI // Sessions // Sent keys (meta={{\"session\":\"{}\"}})",
-        session
-    );
-    println!("Sent command to {}", session);
+    info!("Sent command to session {}", session);
     Ok(())
 }

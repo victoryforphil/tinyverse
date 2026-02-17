@@ -1,31 +1,42 @@
-use std::process::Command;
+use std::io::IsTerminal;
+use std::process::{Command, Stdio};
 
 use anyhow::{bail, Context, Result};
-use log::info;
+use log::{error, info};
 
 use super::args::AttachArgs;
 
 pub fn execute(args: AttachArgs) -> Result<()> {
-    let tmux_args = build_tmux_attach_args(std::env::var_os("TMUX").is_some(), &args.session);
-
-    let output = Command::new("tmux")
-        .args(&tmux_args)
-        .output()
-        .with_context(|| format!("failed to run tmux for session `{}`", args.session))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        bail!(
-            "failed to attach/switch to session `{}` (stderr={stderr:?})",
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        error!(
+            "Attach needs an interactive terminal (session: {})",
             args.session
+        );
+        bail!(
+            "attach requires an interactive terminal (TTY); run this command directly in your shell"
         );
     }
 
-    info!(
-        "CLI // Sessions // Attached to session (meta={{\"session\":\"{}\",\"in_tmux\":{}}})",
-        args.session,
-        std::env::var_os("TMUX").is_some()
-    );
+    let tmux_args = build_tmux_attach_args(std::env::var_os("TMUX").is_some(), &args.session);
+
+    let status = Command::new("tmux")
+        .args(&tmux_args)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .with_context(|| format!("failed to run tmux for session `{}`", args.session))?;
+
+    if !status.success() {
+        error!(
+            "Attach failed for session {} (exit code: {:?})",
+            args.session,
+            status.code()
+        );
+        bail!("failed to attach/switch to session `{}`", args.session);
+    }
+
+    info!("Attached to session {}", args.session);
 
     Ok(())
 }

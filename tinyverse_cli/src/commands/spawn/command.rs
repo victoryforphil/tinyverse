@@ -4,16 +4,19 @@ use anyhow::{Context, Result};
 use log::info;
 use tinyverse_lib::tmux::{SpawnSessionOptions, TmuxClient};
 
-use super::args::{Agent, SpawnArgs};
+use super::args::SpawnArgs;
+use crate::providers::{find_by_key, LaunchContext};
 
 pub fn execute(args: SpawnArgs) -> Result<()> {
     let session_name = default_session_name();
     let prompt = resolve_prompt(args.prompt.as_deref())?;
-    let agent_command = build_agent_command(
-        args.agent.clone(),
-        prompt.as_deref(),
-        args.agent_args.as_deref(),
-    );
+    let provider = find_by_key(args.agent.as_str())
+        .with_context(|| format!("unknown provider `{}`", args.agent))?;
+    let agent_command = provider.build_launch_command(LaunchContext {
+        prompt: prompt.as_deref(),
+        model: args.model.as_deref(),
+        args: args.agent_args.as_deref(),
+    });
 
     let mut options = SpawnSessionOptions::new(session_name.clone());
     options.working_dir = std::env::current_dir().ok();
@@ -25,16 +28,14 @@ pub fn execute(args: SpawnArgs) -> Result<()> {
         .with_context(|| format!("failed to spawn session `{session_name}`"))?;
 
     info!(
-        "CLI // Sessions // Spawned session (meta={{\"session\":\"{}\",\"agent\":\"{:?}\",\"prompt\":{},\"agent_args\":{}}})",
+        "Started session {} with {}",
         result.session,
-        args.agent,
-        prompt.is_some(),
-        args.agent_args.is_some()
+        provider.metadata().name
     );
-
-    println!("session: {}", result.session);
-    println!("console_pane: {}", result.console_pane_id);
-    println!("agent_pane: {}", result.agent_pane_id);
+    info!(
+        "Panes: console={}, agent={}",
+        result.console_pane_id, result.agent_pane_id
+    );
 
     Ok(())
 }
@@ -68,57 +69,13 @@ fn resolve_prompt(prompt_arg: Option<&str>) -> Result<Option<String>> {
     Ok(Some(trimmed.to_owned()))
 }
 
-fn build_agent_command(agent: Agent, prompt: Option<&str>, agent_args: Option<&str>) -> String {
-    let binary = match agent {
-        Agent::Opencode => "opencode",
-    };
-
-    let args_text = match (agent_args, prompt) {
-        (Some(raw_args), Some(prompt_value)) if raw_args.contains("{prompt}") => {
-            raw_args.replace("{prompt}", &shell_escape(prompt_value))
-        }
-        (Some(raw_args), Some(prompt_value)) => {
-            format!("{raw_args} {}", shell_escape(prompt_value))
-        }
-        (Some(raw_args), None) => raw_args.to_owned(),
-        (None, Some(prompt_value)) => shell_escape(prompt_value),
-        (None, None) => String::new(),
-    };
-
-    if args_text.trim().is_empty() {
-        return binary.to_owned();
-    }
-
-    format!("{binary} {args_text}")
-}
-
-fn shell_escape(value: &str) -> String {
-    if value.is_empty() {
-        return "''".to_owned();
-    }
-
-    let escaped = value.replace('"', "\\\"");
-    format!("\"{escaped}\"")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{build_agent_command, shell_escape};
-    use crate::commands::spawn::args::Agent;
+    use super::resolve_prompt;
 
     #[test]
-    fn escapes_prompt_for_shell_command() {
-        assert_eq!(shell_escape("hello world"), "\"hello world\"");
-    }
-
-    #[test]
-    fn injects_prompt_placeholder_when_present() {
-        let command = build_agent_command(
-            Agent::Opencode,
-            Some("run tests"),
-            Some("--prompt {prompt} --model fast"),
-        );
-
-        assert_eq!(command, "opencode --prompt \"run tests\" --model fast");
+    fn treats_empty_prompt_as_none() {
+        let resolved = resolve_prompt(Some("   ")).expect("prompt resolution should succeed");
+        assert!(resolved.is_none());
     }
 }
