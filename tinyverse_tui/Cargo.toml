@@ -1,0 +1,10 @@
+[package]
+name = "tinyverse_tui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = { version = "1.0.101", features = ["backtrace"] }
+crossterm = "0.29.0"
+ratatui = "0.29.0"
+tinyverse_lib = { path = "../tinyverse_lib" }
