@@ -5,10 +5,10 @@ use anyhow::Result;
 use ratatui::layout::Rect;
 use tinyverse_lib::{SessionStore, StoredSession};
 
-use crate::TuiRunOptions;
 use crate::chat::ChatState;
 use crate::chat_bridge::ChatBridge;
 use crate::theme::UiTheme;
+use crate::TuiRunOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
@@ -170,6 +170,13 @@ pub struct ChatLayoutCache {
     pub autocomplete_rect: Option<Rect>,
     pub autocomplete_list_rect: Option<Rect>,
     pub autocomplete_list_start: usize,
+    pub part_toggle_hitboxes: Vec<ChatPartToggleHitbox>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatPartToggleHitbox {
+    pub rect: Rect,
+    pub part_key: String,
 }
 
 #[derive(Debug, Clone)]
@@ -290,6 +297,8 @@ pub struct LayoutCache {
 pub struct App {
     pub options: TuiRunOptions,
     pub theme: UiTheme,
+    pub repo_name: Option<String>,
+    pub git_branch: Option<String>,
     pub sessions: Vec<StoredSession>,
     pub selected_index: usize,
     pub scroll_row: usize,
@@ -306,6 +315,7 @@ pub struct App {
     pub chat: ChatState,
     pub chat_bridge: ChatBridge,
     pub pane_preview_cache: HashMap<String, PanePreview>,
+    pub show_card_preview_on_all_cards: bool,
     pub footer_hover_action: Option<FooterHotkeyAction>,
     pub should_quit: bool,
     pub status_message: String,
@@ -318,6 +328,8 @@ impl App {
         Self {
             options,
             theme: UiTheme::default(),
+            repo_name: None,
+            git_branch: None,
             sessions: Vec::new(),
             selected_index: 0,
             scroll_row: 0,
@@ -334,6 +346,7 @@ impl App {
             chat: ChatState::default(),
             chat_bridge: ChatBridge::from_env(),
             pane_preview_cache: HashMap::new(),
+            show_card_preview_on_all_cards: false,
             footer_hover_action: None,
             should_quit: false,
             status_message: String::new(),

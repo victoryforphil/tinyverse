@@ -3,6 +3,8 @@ mod helpers;
 mod render;
 
 use std::io;
+use std::path::PathBuf;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -28,8 +30,12 @@ pub fn run(options: TuiRunOptions) -> Result<()> {
 
     let mut app = App::new(options);
     app.theme = load_theme();
+    let (repo_name, git_branch) = detect_git_metadata();
+    app.repo_name = repo_name;
+    app.git_branch = git_branch;
     if let Ok(saved_prefs) = prefs::load() {
         saved_prefs.apply_to_spawn_form(&mut app.spawn_form);
+        saved_prefs.apply_to_app(&mut app);
     }
     app.refresh(&mut store)?;
     events::refresh_selected_preview(&mut app);
@@ -47,6 +53,43 @@ pub fn run(options: TuiRunOptions) -> Result<()> {
         }
         (Ok(()), Ok(())) => Ok(()),
     }
+}
+
+fn detect_git_metadata() -> (Option<String>, Option<String>) {
+    let repo_name = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if !output.status.success() {
+                return None;
+            }
+            let top = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if top.is_empty() {
+                return None;
+            }
+            PathBuf::from(top)
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+        });
+
+    let git_branch = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .ok()
+        .and_then(|output| {
+            if !output.status.success() {
+                return None;
+            }
+            let branch = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if branch.is_empty() || branch == "HEAD" {
+                None
+            } else {
+                Some(branch)
+            }
+        });
+
+    (repo_name, git_branch)
 }
 
 pub(super) fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>> {

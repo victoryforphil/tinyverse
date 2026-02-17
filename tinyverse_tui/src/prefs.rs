@@ -9,6 +9,7 @@ const PREFS_FILE_NAME: &str = "tui_prefs.toml";
 pub struct TuiPrefs {
     pub spawn_agent: Option<String>,
     pub spawn_model: Option<String>,
+    pub show_card_preview_on_all_cards: Option<bool>,
 }
 
 impl TuiPrefs {
@@ -25,6 +26,12 @@ impl TuiPrefs {
             .filter(|value| !value.is_empty())
             .map(ToOwned::to_owned)
             .unwrap_or_default();
+    }
+
+    pub fn apply_to_app(&self, app: &mut crate::app::App) {
+        if let Some(show_on_all_cards) = self.show_card_preview_on_all_cards {
+            app.show_card_preview_on_all_cards = show_on_all_cards;
+        }
     }
 }
 
@@ -72,6 +79,9 @@ fn parse_prefs(raw: &str) -> TuiPrefs {
         match key {
             "spawn_agent" => prefs.spawn_agent = Some(parsed),
             "spawn_model" => prefs.spawn_model = Some(parsed),
+            "show_card_preview_on_all_cards" => {
+                prefs.show_card_preview_on_all_cards = parse_bool(&parsed)
+            }
             _ => {}
         }
     }
@@ -85,6 +95,12 @@ fn render_prefs(prefs: &TuiPrefs) -> String {
     }
     if let Some(model) = prefs.spawn_model.as_deref() {
         lines.push(format!("spawn_model = \"{}\"", escape(model)));
+    }
+    if let Some(show_on_all_cards) = prefs.show_card_preview_on_all_cards {
+        lines.push(format!(
+            "show_card_preview_on_all_cards = {}",
+            if show_on_all_cards { "true" } else { "false" }
+        ));
     }
     lines.push(String::new());
     lines.join("\n")
@@ -100,4 +116,39 @@ fn unquote(value: &str) -> String {
 
 fn escape(value: &str) -> String {
     value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn parse_bool(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Some(true),
+        "false" | "0" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TuiPrefs, parse_prefs, render_prefs};
+
+    #[test]
+    fn parses_preview_scope_flag() {
+        let prefs = parse_prefs(
+            "spawn_agent = \"opencode\"\nshow_card_preview_on_all_cards = true\n",
+        );
+
+        assert_eq!(prefs.spawn_agent.as_deref(), Some("opencode"));
+        assert_eq!(prefs.show_card_preview_on_all_cards, Some(true));
+    }
+
+    #[test]
+    fn renders_preview_scope_flag() {
+        let prefs = TuiPrefs {
+            spawn_agent: Some(String::from("opencode")),
+            spawn_model: Some(String::from("openai/gpt-5.3-codex")),
+            show_card_preview_on_all_cards: Some(false),
+        };
+
+        let rendered = render_prefs(&prefs);
+        assert!(rendered.contains("show_card_preview_on_all_cards = false"));
+    }
 }

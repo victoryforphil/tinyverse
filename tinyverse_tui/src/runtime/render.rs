@@ -3,16 +3,17 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Wrap};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::app::{
-    ACTION_MENU_DANGER_SPLIT_AFTER, App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction,
-    SidebarTab,
+    ACTION_MENU_DANGER_SPLIT_AFTER, App, AppMode, ChatPartToggleHitbox, FooterHotkeyAction,
+    MENU_ACTIONS, MenuAction, SidebarTab,
 };
 use crate::chat::{ChatMessagePart, ChatMessageRole, ComposerAutocompleteMode};
 
 use super::helpers::{
-    anchored_rect, centered_rect, inset_rect, key_hint, status_pill, styled_panel, tag_pill,
-    truncate_to,
+    anchored_rect, centered_rect, inset_rect, key_hint, pill_badge, status_pill, styled_panel,
+    tag_pill, truncate_to,
 };
 
 const CARD_WIDTH: u16 = 36;
@@ -21,6 +22,11 @@ const CARD_GAP_X: u16 = 2;
 const CARD_GAP_Y: u16 = 1;
 const CHAT_COMPOSER_HEIGHT: u16 = 6;
 const CHAT_POPUP_MAX_VISIBLE: usize = 8;
+
+struct RenderedChatLine {
+    line: Line<'static>,
+    toggle_key: Option<String>,
+}
 
 pub(crate) fn render_frame(frame: &mut Frame, app: &mut App) {
     let root = frame.area();
@@ -208,6 +214,11 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
             Style::default().fg(app.theme.text_secondary)
         };
 
+        let created = session.created_at.format("%b %d %H:%M").to_string();
+        let last_update = session.last_message_at.unwrap_or(session.updated_at);
+        let ago = relative_time_ago(last_update.and_utc().timestamp());
+        let bottom_meta_style = Style::default().fg(app.theme.text_muted);
+
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border_color))
@@ -220,7 +231,12 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
                     )
                 ),
                 title_style,
-            )]));
+            )]))
+            .title_bottom(Line::from(vec![
+                Span::styled(format!(" {created} "), bottom_meta_style),
+                Span::styled("·", bottom_meta_style),
+                Span::styled(format!(" {ago} "), bottom_meta_style),
+            ]));
 
         let inner = block.inner(card_area);
         frame.render_widget(block, card_area);
@@ -254,38 +270,65 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         let card_inner = inset_rect(inner, 1, 0);
         let max_preview_width = card_area.width.saturating_sub(6).max(8) as usize;
 
-        let created = session.created_at.format("%b %d %H:%M").to_string();
+        let message_count = app.chat.messages.len();
+        let message_label = if message_count == 1 {
+            String::from("1 msg")
+        } else {
+            format!("{message_count} msgs")
+        };
 
         let mut card_lines = vec![
             Line::from(vec![
                 status_pill(&session.status_string, &app.theme),
                 Span::raw(" "),
                 tag_pill(&truncate_to(&session.agent_type, 12), &app.theme),
-                Span::raw(" "),
+            ]),
+            Line::from(vec![
                 Span::styled(
-                    format!(" {} msg ", app.chat.messages.len()),
-                    Style::default()
-                        .fg(app.theme.pill_info_fg)
-                        .bg(app.theme.pill_info_bg),
+                    truncate_to(
+                        &app.chat.active_model,
+                        card_area.width.saturating_sub(16).max(8) as usize,
+                    ),
+                    Style::default().fg(app.theme.text_secondary),
+                ),
+                Span::raw(" "),
+                pill_badge(
+                    &message_label,
+                    app.theme.pill_warn_fg,
+                    app.theme.pill_warn_bg,
+                    true,
                 ),
             ]),
-            Line::from(Span::styled(
-                format!(
-                    "{} · {}",
-                    truncate_to(&created, 14),
-                    truncate_to(&app.chat.active_model, 14)
-                ),
-                Style::default().fg(app.theme.text_secondary),
-            )),
         ];
 
-        let preview_lines = if is_selected { 3usize } else { 1 };
-        if let Some(preview_text) = latest_assistant_preview(app) {
+        if app.repo_name.is_some() || app.git_branch.is_some() {
+            let label = match (app.repo_name.as_deref(), app.git_branch.as_deref()) {
+                (Some(repo), Some(branch)) => {
+                    format!("{}#{}", truncate_to(repo, 10), truncate_to(branch, 12))
+                }
+                (Some(repo), None) => truncate_to(repo, 16),
+                (None, Some(branch)) => format!("#{}", truncate_to(branch, 14)),
+                (None, None) => String::new(),
+            };
+
+            if !label.is_empty() {
+                card_lines.push(Line::from(vec![Span::styled(
+                    format!(" {label} "),
+                    Style::default()
+                        .fg(app.theme.pill_ok_fg)
+                        .bg(app.theme.pill_ok_bg),
+                )]));
+            }
+        }
+
+        let should_show_preview = is_selected || app.show_card_preview_on_all_cards;
+        if should_show_preview && let Some(preview_text) = latest_assistant_preview(app) {
+            let preview_line_count = if is_selected { 3 } else { 1 };
             card_lines.push(Line::from(Span::styled(
                 "─".repeat(max_preview_width.min(card_inner.width as usize)),
                 Style::default().fg(app.theme.pane_unfocused_border),
             )));
-            for line in preview_excerpt_lines(&preview_text, max_preview_width, preview_lines) {
+            for line in preview_excerpt_lines(&preview_text, max_preview_width, preview_line_count) {
                 card_lines.push(Line::from(Span::styled(
                     format!("{line}"),
                     if is_selected {
@@ -394,53 +437,94 @@ fn render_bottom_inspector(frame: &mut Frame, area: Rect, app: &App) {
         return;
     };
 
+    let created = session.created_at.format("%b %d %H:%M").to_string();
+    let last_update = session.last_message_at.unwrap_or(session.updated_at);
+    let ago = relative_time_ago(last_update.and_utc().timestamp());
+    let bridge = app.chat_bridge.status();
+    let git_label = match (app.repo_name.as_deref(), app.git_branch.as_deref()) {
+        (Some(repo), Some(branch)) => format!("{repo}#{branch}"),
+        (Some(repo), None) => repo.to_owned(),
+        (None, Some(branch)) => format!("#{branch}"),
+        (None, None) => String::from("-"),
+    };
+    let assistant_preview =
+        latest_assistant_preview(app).unwrap_or_else(|| String::from("No assistant messages yet"));
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(3)])
+        .split(inner);
+
+    let badge_line = Line::from(vec![
+        status_pill(&session.status_string, &app.theme),
+        Span::raw(" "),
+        tag_pill(&truncate_to(&session.agent_type, 14), &app.theme),
+        Span::raw(" "),
+        pill_badge(
+            &format!("{} msg", app.chat.messages.len()),
+            app.theme.pill_info_fg,
+            app.theme.pill_info_bg,
+            false,
+        ),
+        Span::raw(" "),
+        pill_badge(
+            &format!("{}", truncate_to(&app.chat.active_model, 24)),
+            app.theme.pill_accent_fg,
+            app.theme.pill_accent_bg,
+            false,
+        ),
+    ]);
+    frame.render_widget(Paragraph::new(badge_line), chunks[0]);
+
     let left_rows = vec![
         Row::new(vec![
             Cell::from("Name"),
             Cell::from(session.session_name.as_str()),
         ]),
+        Row::new(vec![Cell::from("Created"), Cell::from(created)]),
+        Row::new(vec![Cell::from("Last Update"), Cell::from(ago)]),
         Row::new(vec![
-            Cell::from("Key"),
-            Cell::from(session.session_key.as_str()),
-        ]),
-        Row::new(vec![
-            Cell::from("Agent"),
-            Cell::from(session.agent_type.as_str()),
-        ]),
-        Row::new(vec![
-            Cell::from("Status"),
-            Cell::from(session.status_string.as_str()).style(
-                Style::default()
-                    .fg(status_color(&session.status_string, app))
-                    .add_modifier(Modifier::BOLD),
-            ),
+            Cell::from("Assistant"),
+            Cell::from(truncate_to(&assistant_preview, 44)),
         ]),
     ];
 
     let right_rows = vec![
         Row::new(vec![
+            Cell::from("Key"),
+            Cell::from(session.session_key.as_str()),
+        ]),
+        Row::new(vec![
             Cell::from("Tmux"),
             Cell::from(session.tmux_session_name.as_str()),
         ]),
         Row::new(vec![
-            Cell::from("Console Pane"),
-            Cell::from(session.console_pane_id.as_deref().unwrap_or("-")),
+            Cell::from("Panes"),
+            Cell::from(format!(
+                "console={} agent={}",
+                session.console_pane_id.as_deref().unwrap_or("-"),
+                session.agent_pane_id.as_deref().unwrap_or("-")
+            )),
         ]),
         Row::new(vec![
-            Cell::from("Agent Pane"),
-            Cell::from(session.agent_pane_id.as_deref().unwrap_or("-")),
+            Cell::from("Git"),
+            Cell::from(truncate_to(&git_label, 44)),
         ]),
         Row::new(vec![
-            Cell::from("Description"),
-            Cell::from(session.description.as_deref().unwrap_or("(none)")),
+            Cell::from("Chat Bridge"),
+            Cell::from(format!(
+                "{} ({})",
+                bridge.mode.label(),
+                truncate_to(&bridge.detail, 28)
+            )),
         ]),
     ];
 
-    if inner.width >= 92 {
+    if chunks[1].width >= 92 {
         let columns = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(inner);
+            .split(chunks[1]);
         let left_table = Table::new(left_rows, [Constraint::Length(12), Constraint::Min(10)])
             .column_spacing(1)
             .style(Style::default().fg(app.theme.text_secondary));
@@ -454,7 +538,7 @@ fn render_bottom_inspector(frame: &mut Frame, area: Rect, app: &App) {
         let table = Table::new(rows, [Constraint::Length(14), Constraint::Min(10)])
             .column_spacing(1)
             .style(Style::default().fg(app.theme.text_secondary));
-        frame.render_widget(table, inner);
+        frame.render_widget(table, chunks[1]);
     }
 }
 
@@ -549,43 +633,66 @@ fn render_chat_messages(frame: &mut Frame, area: Rect, app: &mut App) {
     frame.render_widget(block, area);
 
     let max_lines = inner.height as usize;
-    let mut lines = Vec::new();
-    for message in app.chat.messages.iter() {
+    let mut lines: Vec<RenderedChatLine> = Vec::new();
+    app.layout.chat.part_toggle_hitboxes.clear();
+
+    for (message_index, message) in app.chat.messages.iter().enumerate() {
         let role_color = match message.role {
             ChatMessageRole::System => app.theme.pill_warn_fg,
             ChatMessageRole::User => app.theme.pill_info_fg,
             ChatMessageRole::Assistant => app.theme.pill_accent_fg,
         };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" {} ", message.role.label()),
-                Style::default().fg(role_color).add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(" {}", message.created_at),
-                Style::default().fg(app.theme.text_muted),
-            ),
-        ]));
+        lines.push(RenderedChatLine {
+            line: Line::from(vec![
+                Span::styled(
+                    format!(" {} ", message.role.label()),
+                    Style::default().fg(role_color).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" {}", message.created_at),
+                    Style::default().fg(app.theme.text_muted),
+                ),
+            ]),
+            toggle_key: None,
+        });
+
         if message.parts.is_empty() {
             for text_line in message.text.lines() {
-                lines.push(Line::from(Span::styled(
-                    text_line.to_owned(),
-                    Style::default().fg(app.theme.text_secondary),
-                )));
+                lines.push(RenderedChatLine {
+                    line: Line::from(Span::styled(
+                        text_line.to_owned(),
+                        Style::default().fg(app.theme.text_secondary),
+                    )),
+                    toggle_key: None,
+                });
             }
         } else {
-            for part in &message.parts {
-                lines.extend(render_chat_part_lines(part, app, inner.width));
+            for (part_index, part) in message.parts.iter().enumerate() {
+                let part_key = app.chat.part_key(message, message_index, part_index);
+                let expanded = app.chat.is_part_expanded(&part_key);
+                lines.extend(render_chat_part_lines(
+                    part,
+                    app,
+                    inner.width,
+                    Some(part_key),
+                    expanded,
+                ));
             }
         }
-        lines.push(Line::from(""));
+        lines.push(RenderedChatLine {
+            line: Line::from(""),
+            toggle_key: None,
+        });
     }
 
     if lines.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No messages yet. Press c to compose.",
-            Style::default().fg(app.theme.text_muted),
-        )));
+        lines.push(RenderedChatLine {
+            line: Line::from(Span::styled(
+                "No messages yet. Press c to compose.",
+                Style::default().fg(app.theme.text_muted),
+            )),
+            toggle_key: None,
+        });
     }
 
     let overflow = lines.len().saturating_sub(max_lines);
@@ -596,24 +703,59 @@ fn render_chat_messages(frame: &mut Frame, area: Rect, app: &mut App) {
         .skip(start)
         .take(max_lines)
         .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(visible).wrap(Wrap { trim: false }), inner);
+
+    for (row, rendered) in visible.iter().enumerate() {
+        if let Some(part_key) = rendered.toggle_key.as_ref() {
+            app.layout
+                .chat
+                .part_toggle_hitboxes
+                .push(ChatPartToggleHitbox {
+                    rect: Rect {
+                        x: inner.x,
+                        y: inner.y.saturating_add(row as u16),
+                        width: inner.width,
+                        height: 1,
+                    },
+                    part_key: part_key.clone(),
+                });
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(
+            visible
+                .into_iter()
+                .map(|entry| entry.line)
+                .collect::<Vec<_>>(),
+        )
+        .wrap(Wrap { trim: false }),
+        inner,
+    );
 }
 
-fn render_chat_part_lines(part: &ChatMessagePart, app: &App, width: u16) -> Vec<Line<'static>> {
+fn render_chat_part_lines(
+    part: &ChatMessagePart,
+    app: &App,
+    width: u16,
+    part_key: Option<String>,
+    expanded: bool,
+) -> Vec<RenderedChatLine> {
     let max = width.saturating_sub(4) as usize;
     match part {
         ChatMessagePart::Text(value) => value
             .lines()
-            .map(|line| {
-                Line::from(Span::styled(
+            .map(|line| RenderedChatLine {
+                line: Line::from(Span::styled(
                     line.to_owned(),
                     Style::default().fg(app.theme.text_secondary),
-                ))
+                )),
+                toggle_key: None,
             })
             .collect(),
         ChatMessagePart::Markdown(value) => value
             .lines()
-            .map(|line| {
+            .enumerate()
+            .map(|(index, line)| {
                 let trimmed = line.trim_start();
                 let style = if trimmed.starts_with('#') {
                     Style::default()
@@ -624,43 +766,94 @@ fn render_chat_part_lines(part: &ChatMessagePart, app: &App, width: u16) -> Vec<
                 } else {
                     Style::default().fg(app.theme.text_secondary)
                 };
-                Line::from(Span::styled(line.to_owned(), style))
+                RenderedChatLine {
+                    line: Line::from(Span::styled(line.to_owned(), style)),
+                    toggle_key: if index == 0 && part_key.is_some() && part.is_collapsible() {
+                        part_key.clone()
+                    } else {
+                        None
+                    },
+                }
             })
             .collect(),
         ChatMessagePart::Thinking(value) => {
-            let mut out = vec![Line::from(Span::styled(
-                "🧠 Thinking",
-                Style::default()
-                    .fg(app.theme.pill_muted_fg)
-                    .add_modifier(Modifier::ITALIC),
-            ))];
-            for line in value.lines() {
-                out.push(Line::from(Span::styled(
-                    format!("  {line}"),
+            let mut out = vec![RenderedChatLine {
+                line: Line::from(Span::styled(
+                    if expanded {
+                        "▼ 🧠 Thinking"
+                    } else {
+                        "▶ 🧠 Thinking"
+                    },
                     Style::default()
-                        .fg(app.theme.text_muted)
+                        .fg(app.theme.pill_muted_fg)
                         .add_modifier(Modifier::ITALIC),
-                )));
+                )),
+                toggle_key: part_key.clone(),
+            }];
+            if !expanded {
+                let preview = value.lines().next().unwrap_or("(no detail)");
+                out.push(RenderedChatLine {
+                    line: Line::from(Span::styled(
+                        format!("  {}", truncate_to(preview, max)),
+                        Style::default().fg(app.theme.text_muted),
+                    )),
+                    toggle_key: None,
+                });
+                return out;
+            }
+
+            for line in value.lines() {
+                out.push(RenderedChatLine {
+                    line: Line::from(Span::styled(
+                        format!("  {line}"),
+                        Style::default()
+                            .fg(app.theme.text_muted)
+                            .add_modifier(Modifier::ITALIC),
+                    )),
+                    toggle_key: None,
+                });
             }
             out
         }
         ChatMessagePart::Code { language, code } => {
             let mut out = Vec::new();
             let label = language.as_deref().unwrap_or("text");
-            out.push(Line::from(Span::styled(
-                format!("┌─ code ({label})"),
-                Style::default().fg(app.theme.pill_accent_fg),
-            )));
-            for line in code.lines() {
-                out.push(Line::from(Span::styled(
-                    format!("│ {}", truncate_to(line, max)),
-                    Style::default().fg(app.theme.text_primary),
-                )));
+            out.push(RenderedChatLine {
+                line: Line::from(Span::styled(
+                    format!("{} ┌─ code ({label})", if expanded { "▼" } else { "▶" }),
+                    Style::default().fg(app.theme.pill_accent_fg),
+                )),
+                toggle_key: part_key.clone(),
+            });
+
+            if !expanded {
+                let code_lines = code.lines().count();
+                out.push(RenderedChatLine {
+                    line: Line::from(Span::styled(
+                        format!("  {} line(s)", code_lines.max(1)),
+                        Style::default().fg(app.theme.text_muted),
+                    )),
+                    toggle_key: None,
+                });
+                return out;
             }
-            out.push(Line::from(Span::styled(
-                "└─",
-                Style::default().fg(app.theme.pill_accent_bg),
-            )));
+
+            for line in code.lines() {
+                out.push(RenderedChatLine {
+                    line: Line::from(Span::styled(
+                        format!("│ {}", truncate_to(line, max)),
+                        Style::default().fg(app.theme.text_primary),
+                    )),
+                    toggle_key: None,
+                });
+            }
+            out.push(RenderedChatLine {
+                line: Line::from(Span::styled(
+                    "└─",
+                    Style::default().fg(app.theme.pill_accent_bg),
+                )),
+                toggle_key: None,
+            });
             out
         }
         ChatMessagePart::ToolCall {
@@ -668,45 +861,105 @@ fn render_chat_part_lines(part: &ChatMessagePart, app: &App, width: u16) -> Vec<
             input,
             output,
         } => {
-            let mut out = vec![Line::from(Span::styled(
-                format!("⚙ Tool {name}"),
-                Style::default()
-                    .fg(app.theme.pill_info_fg)
-                    .add_modifier(Modifier::BOLD),
-            ))];
+            let mut out = vec![RenderedChatLine {
+                line: Line::from(Span::styled(
+                    format!("{} ⚙ Tool {name}", if expanded { "▼" } else { "▶" }),
+                    Style::default()
+                        .fg(app.theme.pill_info_fg)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                toggle_key: part_key.clone(),
+            }];
+
+            if !expanded {
+                let has_input = input.as_ref().is_some_and(|value| !value.trim().is_empty());
+                let has_output = output
+                    .as_ref()
+                    .is_some_and(|value| !value.trim().is_empty());
+                out.push(RenderedChatLine {
+                    line: Line::from(Span::styled(
+                        format!(
+                            "  {}{}",
+                            if has_input { "input" } else { "" },
+                            if has_input && has_output {
+                                " + output"
+                            } else if has_output {
+                                "output"
+                            } else {
+                                "metadata"
+                            }
+                        ),
+                        Style::default().fg(app.theme.text_muted),
+                    )),
+                    toggle_key: None,
+                });
+                return out;
+            }
+
             if let Some(input) = input {
                 for (index, line) in input.lines().enumerate() {
                     let prefix = if index == 0 { "  ▸ in  " } else { "       " };
-                    out.push(Line::from(Span::styled(
-                        format!("{prefix}{}", truncate_to(line, max)),
-                        Style::default().fg(app.theme.text_muted),
-                    )));
+                    out.push(RenderedChatLine {
+                        line: Line::from(Span::styled(
+                            format!("{prefix}{}", truncate_to(line, max)),
+                            Style::default().fg(app.theme.text_muted),
+                        )),
+                        toggle_key: None,
+                    });
                 }
             }
             if let Some(output) = output {
                 for (index, line) in output.lines().enumerate() {
                     let prefix = if index == 0 { "  ▸ out " } else { "       " };
-                    out.push(Line::from(Span::styled(
-                        format!("{prefix}{}", truncate_to(line, max)),
-                        Style::default().fg(app.theme.text_secondary),
-                    )));
+                    out.push(RenderedChatLine {
+                        line: Line::from(Span::styled(
+                            format!("{prefix}{}", truncate_to(line, max)),
+                            Style::default().fg(app.theme.text_secondary),
+                        )),
+                        toggle_key: None,
+                    });
                 }
             }
             out
         }
-        ChatMessagePart::ShellCommand(value) => vec![Line::from(Span::styled(
-            format!("❯ {}", truncate_to(value, max)),
-            Style::default()
-                .fg(app.theme.pill_warn_fg)
-                .add_modifier(Modifier::BOLD),
-        ))],
+        ChatMessagePart::ShellCommand(value) => vec![RenderedChatLine {
+            line: Line::from(Span::styled(
+                format!("❯ {}", truncate_to(value, max)),
+                Style::default()
+                    .fg(app.theme.pill_info_fg)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            toggle_key: None,
+        }],
         ChatMessagePart::ShellOutput { output, exit_code } => {
-            let mut out = Vec::new();
-            for line in output.lines() {
-                out.push(Line::from(Span::styled(
-                    format!("  ↳ {}", truncate_to(line, max)),
+            let mut out = vec![RenderedChatLine {
+                line: Line::from(Span::styled(
+                    format!("{} ▾ shell output", if expanded { "▼" } else { "▶" }),
                     Style::default().fg(app.theme.text_muted),
-                )));
+                )),
+                toggle_key: part_key,
+            }];
+
+            if !expanded {
+                let line_count = output.lines().count().max(1);
+                out.push(RenderedChatLine {
+                    line: Line::from(Span::styled(
+                        format!("  {} line(s)", line_count),
+                        Style::default().fg(app.theme.text_muted),
+                    )),
+                    toggle_key: None,
+                });
+                return out;
+            }
+
+            for line in output.lines() {
+                out.push(RenderedChatLine {
+                    line: Line::from(Span::styled(
+                        format!("  ↳ {}", truncate_to(line, max)),
+                        Style::default().fg(app.theme.text_muted),
+                    )),
+                    toggle_key: None,
+                });
             }
             if let Some(code) = exit_code {
                 let style = if *code == 0 {
@@ -716,16 +969,22 @@ fn render_chat_part_lines(part: &ChatMessagePart, app: &App, width: u16) -> Vec<
                         .fg(app.theme.pill_err_fg)
                         .add_modifier(Modifier::BOLD)
                 };
-                out.push(Line::from(Span::styled(format!("  exit {code}"), style)));
+                out.push(RenderedChatLine {
+                    line: Line::from(Span::styled(format!("  exit {code}"), style)),
+                    toggle_key: None,
+                });
             }
             out
         }
-        ChatMessagePart::Error(value) => vec![Line::from(Span::styled(
-            format!("✖ {}", truncate_to(value, max)),
-            Style::default()
-                .fg(app.theme.pill_err_fg)
-                .add_modifier(Modifier::BOLD),
-        ))],
+        ChatMessagePart::Error(value) => vec![RenderedChatLine {
+            line: Line::from(Span::styled(
+                format!("✖ {}", truncate_to(value, max)),
+                Style::default()
+                    .fg(app.theme.pill_err_fg)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            toggle_key: None,
+        }],
     }
 }
 
@@ -804,7 +1063,7 @@ fn render_chat_composer(frame: &mut Frame, area: Rect, app: &mut App) {
     let composer_line = if app.chat.composing {
         app.chat.draft_with_cursor()
     } else {
-        String::from("Press c to compose, enter to send")
+        String::from("Press c to compose, enter to send, z to expand/collapse details")
     };
     frame.render_widget(
         Paragraph::new(composer_line).style(Style::default().fg(if app.chat.composing {
@@ -1258,6 +1517,32 @@ fn preview_excerpt_lines(text: &str, width: usize, max_lines: usize) -> Vec<Stri
     out
 }
 
+fn relative_time_ago(event_unix_seconds: i64) -> String {
+    if event_unix_seconds <= 0 {
+        return String::from("unknown");
+    }
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let delta = now.saturating_sub(event_unix_seconds);
+
+    if delta > 86_400 * 365 * 10 {
+        return String::from(">10y");
+    }
+
+    if delta < 60 {
+        String::from("now")
+    } else if delta < 3600 {
+        format!("{}m ago", delta / 60)
+    } else if delta < 86_400 {
+        format!("{}h ago", delta / 3600)
+    } else {
+        format!("{}d ago", delta / 86_400)
+    }
+}
+
 fn render_action_menu(frame: &mut Frame, area: Rect, app: &mut App) {
     let popup = if let Some((x, y)) = app.action_menu_anchor {
         anchored_rect(44, 13, x, y, area)
@@ -1624,19 +1909,6 @@ pub(super) fn footer_hotkey_hit_test(app: &App, col: u16, row: u16) -> Option<Fo
     }
 
     None
-}
-
-fn status_color(status: &str, app: &App) -> Color {
-    if status.eq_ignore_ascii_case("active") {
-        return app.theme.pill_ok_fg;
-    }
-    if status.eq_ignore_ascii_case("stale") {
-        return app.theme.pill_warn_fg;
-    }
-    if status.eq_ignore_ascii_case("dead") {
-        return app.theme.pill_err_fg;
-    }
-    app.theme.text_secondary
 }
 
 #[cfg(test)]

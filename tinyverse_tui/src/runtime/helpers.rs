@@ -44,7 +44,7 @@ pub fn pill_badge(label: &str, fg: Color, bg: Color, bold: bool) -> Span<'static
         style = style.add_modifier(Modifier::BOLD);
     }
 
-    Span::styled(format!(" {} ", label), style)
+    Span::styled(format!(" {label} "), style)
 }
 
 pub fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {

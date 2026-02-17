@@ -1,20 +1,21 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
+assertion_line: 1949
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
 ╭ Sessions ──────────────────────────────────────────────────────────╮╭ Console ───────────────────────────────────────╮
 │                                                                    ││ 1  Cons   2  Agent   3  Chat                   │
 │  ┌ tinyverse_alpha ────────────── X ┐                              ││Loading console preview...                      │
-│  │  active   opencode   0 msg       │                              ││                                                │
-│  │ Jan 01 00:00 · openai/gpt-5.…    │                              ││                                                │
+│  │  active   opencode               │                              ││                                                │
+│  │ openai/gpt-5.3-codex  0 msgs     │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
 │  │                                  │                              ││                                                │
-│  └──────────────────────────────────┘                              ││                                                │
+│  └ Jan 01 00:00 · unknown ──────────┘                              ││                                                │
 │                                                                    ││                                                │
 │                              ╭ Confirm Kill ──────────────────────────────────────────╮                              │
 │                              │Kill session `tinyverse_alpha`?                         │                              │
@@ -30,11 +31,11 @@ tinyverse tui  |  1 session(s)
 │                                                                    ││                                                │
 ╰────────────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────╯
 ╭ Inspector ───────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│Name         tinyverse_alpha                               Tmux           tinyverse_alpha                             │
-│Key          tinyverse_alpha                               Console Pane   %1                                          │
-│Agent        opencode                                      Agent Pane     %2                                          │
-│Status       active                                        Description    Snapshot test session                       │
-│                                                                                                                      │
-│                                                                                                                      │
+│ active   opencode   0 msg   openai/gpt-5.3-codex                                                                     │
+│Name         tinyverse_alpha                               Key            tinyverse_alpha                             │
+│Created      Jan 01 00:00                                  Tmux           tinyverse_alpha                             │
+│Last Update  unknown                                       Panes          console=%1 agent=%2                         │
+│Assistant    No assistant messages yet                     Git            -                                           │
+│                                                           Chat Bridge    tmux-fallback (waiting for sync)            │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
  y/enter  confirm |  n/esc  cancel | never refreshed

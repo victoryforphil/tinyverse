@@ -437,6 +437,15 @@ fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) 
             app.status_message = String::from("Agent selector opened");
             Ok(true)
         }
+        KeyCode::Char('z') => {
+            app.chat.toggle_collapse_mode();
+            app.status_message = if app.chat.collapse_verbose_parts {
+                String::from("Verbose chat parts collapsed (click chevrons to expand)")
+            } else {
+                String::from("Verbose chat parts expanded")
+            };
+            Ok(true)
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             app.chat.scroll_up(2);
             Ok(true)
@@ -577,6 +586,13 @@ fn handle_chat_mouse_event(mouse: MouseEvent, app: &mut App) -> Result<bool> {
             {
                 app.chat.open_composer();
                 return Ok(true);
+            }
+            for hitbox in &app.layout.chat.part_toggle_hitboxes {
+                if rect_contains(hitbox.rect, x, y) {
+                    app.chat.toggle_part_expansion(hitbox.part_key.clone());
+                    app.status_message = String::from("Toggled detail section");
+                    return Ok(true);
+                }
             }
             if let Some(messages_rect) = app.layout.chat.messages_rect
                 && rect_contains(messages_rect, x, y)
@@ -1236,6 +1252,7 @@ fn save_spawn_prefs(app: &App) {
     let prefs = TuiPrefs {
         spawn_agent: Some(app.spawn_form.agent_type.trim().to_owned()),
         spawn_model: Some(app.spawn_form.model.trim().to_owned()),
+        show_card_preview_on_all_cards: Some(app.show_card_preview_on_all_cards),
     };
 
     let _ = prefs::save(&prefs);

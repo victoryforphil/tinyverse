@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -91,6 +92,17 @@ pub enum ChatMessagePart {
 }
 
 impl ChatMessagePart {
+    pub fn is_collapsible(&self) -> bool {
+        matches!(
+            self,
+            Self::Thinking(_)
+                | Self::Code { .. }
+                | Self::ToolCall { .. }
+                | Self::ShellOutput { .. }
+                | Self::Markdown(_)
+        )
+    }
+
     pub fn preview_line(&self) -> Option<&str> {
         match self {
             Self::Text(value)
@@ -185,9 +197,11 @@ pub struct ChatState {
     pub model_selector: ItemSelector,
     pub agent_selector: ItemSelector,
     pub autocomplete: ComposerAutocomplete,
+    pub collapse_verbose_parts: bool,
     workspace_root: PathBuf,
     workspace_file_cache: Vec<String>,
     workspace_file_cache_loaded: bool,
+    expanded_part_keys: HashSet<String>,
 }
 
 impl Default for ChatState {
@@ -229,9 +243,11 @@ impl ChatState {
             model_selector: ItemSelector::default(),
             agent_selector: ItemSelector::default(),
             autocomplete: ComposerAutocomplete::default(),
+            collapse_verbose_parts: true,
             workspace_root: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             workspace_file_cache: Vec::new(),
             workspace_file_cache_loaded: false,
+            expanded_part_keys: HashSet::new(),
         }
     }
 
@@ -272,6 +288,49 @@ impl ChatState {
         self.composing = false;
         self.close_autocomplete();
         self.scroll_lines = 0;
+    }
+
+    pub fn part_key(
+        &self,
+        message: &ChatMessage,
+        message_index: usize,
+        part_index: usize,
+    ) -> String {
+        if let Some(id) = message.id.as_deref()
+            && !id.trim().is_empty()
+        {
+            return format!("{id}:{part_index}");
+        }
+
+        format!(
+            "{}:{}:{}",
+            message.created_at,
+            message.role.label(),
+            message_index.saturating_mul(64).saturating_add(part_index)
+        )
+    }
+
+    pub fn is_part_expanded(&self, part_key: &str) -> bool {
+        if !self.collapse_verbose_parts {
+            return true;
+        }
+        self.expanded_part_keys.contains(part_key)
+    }
+
+    pub fn toggle_part_expansion(&mut self, part_key: impl Into<String>) {
+        let key = part_key.into();
+        if self.expanded_part_keys.contains(&key) {
+            self.expanded_part_keys.remove(&key);
+        } else {
+            self.expanded_part_keys.insert(key);
+        }
+    }
+
+    pub fn toggle_collapse_mode(&mut self) {
+        self.collapse_verbose_parts = !self.collapse_verbose_parts;
+        if !self.collapse_verbose_parts {
+            self.expanded_part_keys.clear();
+        }
     }
 
     pub fn take_prompt(&self) -> Option<String> {
@@ -376,7 +435,8 @@ impl ChatState {
 
     pub fn set_messages(&mut self, messages: Vec<ChatMessage>) {
         self.messages = messages;
-        self.scroll_lines = 0;
+        self.expanded_part_keys
+            .retain(|_| self.collapse_verbose_parts);
     }
 
     pub fn set_models(&mut self, mut models: Vec<String>) {

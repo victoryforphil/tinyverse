@@ -966,40 +966,102 @@ fn extract_message_parts(value: &Value) -> Vec<ChatMessagePart> {
                     .and_then(Value::as_str)
                     .unwrap_or("tool")
                     .to_owned();
-                let input = part
-                    .get("input")
-                    .or_else(|| part.get("args"))
-                    .map(pretty_json);
-                let output_text = part
-                    .get("output")
-                    .map(pretty_json)
-                    .filter(|value| !value.is_empty());
+                let state = part.get("state").unwrap_or(part);
 
-                if matches!(name.as_str(), "bash" | "shell" | "terminal")
-                    && let Some(command) = part
-                        .get("input")
-                        .and_then(|value| value.get("command"))
-                        .and_then(Value::as_str)
+                let input_value = state.get("input").or_else(|| part.get("input"));
+                let output_value = state.get("output").or_else(|| part.get("output"));
+                let status = state
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToOwned::to_owned);
+
+                if matches!(name.as_str(), "bash" | "shell" | "terminal") {
+                    let command = input_value
+                        .and_then(|value| {
+                            value
+                                .get("command")
+                                .or_else(|| value.get("text"))
+                                .or_else(|| value.get("cmd"))
+                                .and_then(Value::as_str)
+                        })
                         .map(str::trim)
                         .filter(|value| !value.is_empty())
-                {
-                    output.push(ChatMessagePart::ShellCommand(command.to_owned()));
-                    if let Some(shell_output) = output_text.clone() {
-                        output.push(ChatMessagePart::ShellOutput {
-                            output: shell_output,
-                            exit_code: part
-                                .get("output")
-                                .and_then(|value| value.get("exitCode"))
-                                .and_then(Value::as_i64),
-                        });
+                        .map(ToOwned::to_owned);
+                    if let Some(command) = command {
+                        output.push(ChatMessagePart::ShellCommand(command));
+                    }
+
+                    if let Some(output_value) = output_value {
+                        let shell_output = pretty_json(output_value);
+                        if !shell_output.trim().is_empty() {
+                            let exit_code = output_value
+                                .get("exitCode")
+                                .or_else(|| output_value.get("code"))
+                                .and_then(Value::as_i64);
+                            output.push(ChatMessagePart::ShellOutput {
+                                output: shell_output,
+                                exit_code,
+                            });
+                        }
+                    }
+
+                    if let Some(status) = status {
+                        output.push(ChatMessagePart::Text(format!("shell status: {status}")));
                     }
                 } else {
+                    let input = input_value
+                        .map(pretty_json)
+                        .filter(|value| !value.trim().is_empty());
+                    let output_text = output_value
+                        .map(pretty_json)
+                        .filter(|value| !value.trim().is_empty());
+
+                    let mut input = input;
+                    if let Some(status) = status {
+                        let status_line = format!("status: {status}");
+                        input = Some(match input {
+                            Some(existing) if !existing.trim().is_empty() => {
+                                format!("{status_line}\n{existing}")
+                            }
+                            _ => status_line,
+                        });
+                    }
+
                     output.push(ChatMessagePart::ToolCall {
                         name,
                         input,
                         output: output_text,
                     });
                 }
+            }
+            _ if part_type == "patch" => {
+                let files = part
+                    .get("files")
+                    .and_then(Value::as_array)
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .map(ToOwned::to_owned)
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let hash = part
+                    .get("hash")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+
+                output.push(ChatMessagePart::ToolCall {
+                    name: String::from("patch"),
+                    input: if files.is_empty() {
+                        Some(format!("hash: {hash}"))
+                    } else {
+                        Some(format!("hash: {hash}\nfiles:\n- {}", files.join("\n- ")))
+                    },
+                    output: None,
+                });
             }
             _ if matches!(
                 part_type.as_str(),
