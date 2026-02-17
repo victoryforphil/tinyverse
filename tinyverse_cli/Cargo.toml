@@ -12,6 +12,7 @@ prettytable-rs = "0.10.0"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tinyverse_lib = { path = "../tinyverse_lib" }
+tinyverse_ui = { path = "../tinyverse_ui" }
 toml = "1.0.2"
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-log = "0.2.0"

@@ -1,5 +1,7 @@
-use anyhow::{Context, Result, anyhow};
-use nu_ansi_term::{Color, Style};
+use std::io::IsTerminal;
+
+use anyhow::{anyhow, Context, Result};
+use tinyverse_ui::{ActionLine, DefaultTheme, ErrorBlock, RenderContext, RenderMode, Tone};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::fmt::format::Writer;
@@ -10,11 +12,30 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry};
 
 const RUST_INFO_ENV: &str = "RUST_INFO";
+const NO_COLOR_ENV: &str = "NO_COLOR";
 const DEFAULT_LOG_LEVEL: &str = "INFO";
-const LEVEL_BADGE_WIDTH: usize = 5;
-pub struct TinyverseFormat;
 
-impl<S, N> FormatEvent<S, N> for TinyverseFormat
+pub struct FancyFormat {
+    use_ansi: bool,
+}
+
+impl FancyFormat {
+    fn new(use_ansi: bool) -> Self {
+        Self { use_ansi }
+    }
+
+    fn render_context(&self) -> RenderContext<'static> {
+        static THEME: DefaultTheme = DefaultTheme;
+        let mode = if self.use_ansi {
+            RenderMode::Ansi
+        } else {
+            RenderMode::Plain
+        };
+        RenderContext::new(mode, None, &THEME)
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for FancyFormat
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
     N: for<'a> FormatFields<'a> + 'static,
@@ -26,30 +47,59 @@ where
         event: &Event<'_>,
     ) -> std::fmt::Result {
         let metadata = event.metadata();
-        let badge = format!(
-            "{:<width$}",
-            level_label(metadata.level()),
-            width = LEVEL_BADGE_WIDTH
-        );
+        let context = self.render_context();
         let mut message_visitor = EventMessageVisitor::default();
         event.record(&mut message_visitor);
-        let message = message_visitor.rendered_message();
-        let mut lines = message.lines();
+
+        if *metadata.level() == Level::ERROR && message_visitor.should_render_error_block() {
+            let primary_message = message_visitor.primary_message();
+            let mut message_lines = primary_message.lines();
+            let title = message_lines.next().unwrap_or_default();
+            let mut error_block = ErrorBlock::new(title);
+            if let Some(detail) = message_lines.next() {
+                error_block = error_block.with_detail(detail);
+            }
+            if let Some(guidance) = message_visitor.guidance.as_deref() {
+                error_block = error_block.with_guidance(guidance);
+            }
+
+            writeln!(writer, "{}", error_block.render(&context))?;
+
+            for line in message_lines {
+                writeln!(writer, "{} {}", continuation_prefix(), line)?;
+            }
+
+            if let Some(extras) = message_visitor.extras_line() {
+                writeln!(writer, "{} {}", continuation_prefix(), extras)?;
+            }
+
+            return Ok(());
+        }
+
+        let rendered_message = message_visitor.rendered_message();
+        let mut lines = rendered_message.lines();
 
         if let Some(first_line) = lines.next() {
-            writeln!(
-                writer,
-                "{} {}",
-                level_style(metadata.level()).paint(badge),
-                first_line
-            )?;
+            let line = ActionLine::new(
+                level_label(metadata.level()),
+                first_line,
+                level_tone(metadata.level()),
+            )
+            .render(&context);
+            writeln!(writer, "{line}")?;
             for line in lines {
                 writeln!(writer, "{} {}", continuation_prefix(), line)?;
             }
             return Ok(());
         }
 
-        writeln!(writer, "{}", level_style(metadata.level()).paint(badge))
+        let line = ActionLine::new(
+            level_label(metadata.level()),
+            "",
+            level_tone(metadata.level()),
+        )
+        .render(&context);
+        writeln!(writer, "{line}")
     }
 }
 
@@ -60,11 +110,12 @@ pub fn init() -> Result<()> {
         .or_else(|_| EnvFilter::try_new(DEFAULT_LOG_LEVEL))
         .context("failed to build env filter")?;
 
+    let use_ansi = std::io::stdout().is_terminal() && std::env::var_os(NO_COLOR_ENV).is_none();
     let fmt_layer = tracing_subscriber::fmt::layer()
         .without_time()
         .with_target(false)
-        .with_ansi(true)
-        .event_format(TinyverseFormat);
+        .with_ansi(use_ansi)
+        .event_format(FancyFormat::new(use_ansi));
 
     Registry::default()
         .with(env_filter)
@@ -73,16 +124,6 @@ pub fn init() -> Result<()> {
         .map_err(|error| anyhow!("failed to initialize tracing subscriber: {error}"))?;
 
     Ok(())
-}
-
-fn level_style(level: &Level) -> Style {
-    match *level {
-        Level::ERROR => Style::new().on(Color::Red).fg(Color::White).bold(),
-        Level::WARN => Style::new().on(Color::Yellow).fg(Color::Black).bold(),
-        Level::INFO => Style::new().on(Color::Blue).fg(Color::White),
-        Level::DEBUG => Style::new().on(Color::Cyan).fg(Color::Black),
-        Level::TRACE => Style::new().on(Color::Purple).fg(Color::White),
-    }
 }
 
 fn level_label(level: &Level) -> &'static str {
@@ -95,34 +136,59 @@ fn level_label(level: &Level) -> &'static str {
     }
 }
 
+fn level_tone(level: &Level) -> Tone {
+    match *level {
+        Level::ERROR => Tone::Error,
+        Level::WARN => Tone::Warning,
+        Level::INFO => Tone::Info,
+        Level::DEBUG | Level::TRACE => Tone::Neutral,
+    }
+}
+
 fn continuation_prefix() -> &'static str {
-    "      |-"
+    "          |-"
 }
 
 #[derive(Default)]
 struct EventMessageVisitor {
     message: Option<String>,
+    guidance: Option<String>,
     extras: Vec<String>,
 }
 
 impl EventMessageVisitor {
-    fn rendered_message(self) -> String {
-        match (self.message, self.extras.is_empty()) {
-            (Some(message), true) => message,
-            (Some(mut message), false) => {
-                message.push_str(" (");
-                message.push_str(&self.extras.join(", "));
-                message.push(')');
-                message
-            }
+    fn rendered_message(&self) -> String {
+        match (&self.message, self.extras.is_empty()) {
+            (Some(message), true) => message.clone(),
+            (Some(message), false) => format!("{message} ({})", self.extras.join(", ")),
             (None, false) => self.extras.join(", "),
             (None, true) => String::new(),
         }
     }
 
+    fn primary_message(&self) -> String {
+        self.message
+            .clone()
+            .unwrap_or_else(|| self.extras.join(", "))
+    }
+
+    fn extras_line(&self) -> Option<String> {
+        if self.extras.is_empty() {
+            None
+        } else {
+            Some(self.extras.join(", "))
+        }
+    }
+
+    fn should_render_error_block(&self) -> bool {
+        true
+    }
+
     fn record_pair(&mut self, field: &Field, value: String) {
         if field.name() == "message" {
             self.message = Some(value);
+        } else if field.name() == "guidance" || field.name() == "hint" {
+            self.guidance = Some(value);
         } else if field.name().starts_with("log.") {
             return;
         } else {

@@ -1140,6 +1140,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tinyverse_lib",
+ "tinyverse_ui",
  "toml 1.0.2+spec-1.1.0",
  "tracing",
  "tracing-log",
