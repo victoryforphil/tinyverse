@@ -1,4 +1,4 @@
-use tinyverse_ui::example_outputs::{list_report_demo_output_with_theme, ExampleTheme};
+use tinyverse_ui::example_outputs::{ExampleTheme, list_report_demo_output_with_theme};
 use tinyverse_ui::render::RenderMode;
 
 fn main() {

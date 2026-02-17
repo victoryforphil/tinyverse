@@ -1,4 +1,4 @@
-use tinyverse_ui::example_outputs::{primitive_gallery_output_with_theme, ExampleTheme};
+use tinyverse_ui::example_outputs::{ExampleTheme, primitive_gallery_output_with_theme};
 use tinyverse_ui::render::RenderMode;
 
 fn main() {

@@ -7,5 +7,5 @@ pub use components::{
     ActionLine, ColumnAlignment, DetailSection, ErrorBlock, GuidanceLine, LabeledField,
     SectionHeader, StatusBadge, StripeMode, StyledTable, SummaryFooter,
 };
-pub use render::{default_stdout_context, RenderContext, RenderMode};
+pub use render::{RenderContext, RenderMode, default_stdout_context};
 pub use theme::{DefaultTheme, MinimalTheme, Theme, Tone};
