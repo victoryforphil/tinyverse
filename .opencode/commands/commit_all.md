@@ -12,15 +12,17 @@ Goal:
 
 Process:
 
-1. Inspect the repository state (`git status`, staged/unstaged diffs, and recent commit titles for style).
-2. Group changes into logical commit units (by feature, fix, docs, config, refactor, etc.).
-3. For each commit unit:
+1. Summarize the current thread and work performed to provide context for the commits.
+2. Inspect the repository state (`git status`, staged/unstaged diffs, and recent commit titles for style).
+3. Group changes into logical commit units (by feature, fix, docs, config, refactor, etc.).
+4. (Optional) For complex sets of changes, spawn parallel `@gitter` subagents to summarize and process specific change groups.
+5. For each commit unit:
    - Stage only the relevant files.
    - Write a commit title using this repo format:
      - `{Component/Meta} // {Optional Addition} // {Short Description} (Optional,Tags)`
    - Add a short commit body rationale and signature when possible.
-4. Repeat until all intended tracked changes are committed.
-5. Confirm final `git status` is clean.
+6. Repeat until all intended tracked changes are committed.
+7. Confirm final `git status` is clean.
 
 Rules:
 
