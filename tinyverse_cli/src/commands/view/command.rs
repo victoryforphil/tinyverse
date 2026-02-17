@@ -21,6 +21,7 @@ pub fn execute(args: ViewArgs) -> Result<()> {
     options.pane = pane.clone();
     options.start_line = Some(-500);
     options.preserve_ansi = args.output == ViewOutput::Raw;
+    options.include_alternate_screen = true;
 
     let client = TmuxClient::new();
     let captured = client
