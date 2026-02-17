@@ -145,7 +145,7 @@ fn shell_escape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{LaunchContext, Provider, ProviderMetadata, all, find_by_key};
+    use super::{all, find_by_key, LaunchContext, Provider, ProviderMetadata};
 
     struct MockProvider;
 

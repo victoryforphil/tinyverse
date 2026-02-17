@@ -164,7 +164,7 @@ fn append_unmanaged_tmux_sessions(
 
 #[cfg(test)]
 mod tests {
-    use super::{ListItem, ListReport, format_table_report, format_text_report};
+    use super::{format_table_report, format_text_report, ListItem, ListReport};
 
     #[test]
     fn empty_report_has_clear_message() {

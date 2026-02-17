@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use log::info;
-use tinyverse_lib::SessionStore;
 use tinyverse_lib::tmux::{SessionTarget, TmuxClient};
+use tinyverse_lib::SessionStore;
 
 use super::args::KillArgs;
 

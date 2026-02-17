@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 use std::process::{Command, Stdio};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use log::{error, info};
 use tinyverse_lib::SessionStore;
 

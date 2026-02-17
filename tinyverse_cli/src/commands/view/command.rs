@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use log::info;
-use tinyverse_lib::SessionStore;
 use tinyverse_lib::tmux::{CapturePaneOptions, TmuxClient};
+use tinyverse_lib::SessionStore;
 
 use super::args::ViewArgs;
 use crate::commands::tmux_helpers::{pane_target_from_selector, resolve_session_target_with_store};

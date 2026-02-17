@@ -6,7 +6,7 @@ use tinyverse_lib::tmux::{SpawnSessionOptions, TmuxClient};
 use tinyverse_lib::{CreateSessionInput, SessionStore};
 
 use super::args::SpawnArgs;
-use crate::providers::{LaunchContext, find_by_key};
+use crate::providers::{find_by_key, LaunchContext};
 
 pub fn execute(args: SpawnArgs) -> Result<()> {
     let mut store = SessionStore::open_default()?;
