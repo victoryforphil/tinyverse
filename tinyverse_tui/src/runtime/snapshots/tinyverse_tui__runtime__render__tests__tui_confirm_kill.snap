@@ -1,29 +1,29 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 885
+assertion_line: 1463
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
 ╭ Sessions ──────────────────────────────────────────────────────────╮╭ Console ───────────────────────────────────────╮
-│ ┌ tinyverse_alpha ───────────────────────────────────────────────┐ ││ 1  Cons   2  Agent   3  Chat                   │
-│ │ key: tinyverse_alpha                                           │ ││Loading console preview...                      │
-│ │ active   opencode                                              │ ││                                                │
-│ │ tmux: tinyverse_alpha                                          │ ││                                                │
-│ │                                                                │ ││                                                │
-│ └────────────────────────────────────────────────────────────────┘ ││                                                │
+│                                                                    ││ 1  Cons   2  Agent   3  Chat                   │
+│  ┌ tinyverse_alpha ────────────── X ┐                              ││Loading console preview...                      │
+│  │ key: tinyverse_alpha             │                              ││                                                │
+│  │ active   opencode                │                              ││                                                │
+│  │ tmux: tinyverse_alpha            │                              ││                                                │
+│  │                                  │                              ││                                                │
+│  │                                  │                              ││                                                │
+│  │                                  │                              ││                                                │
+│  └──────────────────────────────────┘                              ││                                                │
 │                                                                    ││                                                │
 │                                                                    ││                                                │
 │                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                              ┌ Confirm Kill ──────────────────────────────────────────┐                              │
+│                              ╭ Confirm Kill ──────────────────────────────────────────╮                              │
 │                              │Kill session `tinyverse_alpha`?                         │                              │
 │                              │This will terminate tmux session and remove DB record.  │                              │
 │                              │                                                        │                              │
 │                              │[y/enter] confirm  [n/esc] cancel                       │                              │
 │                              │                                                        │                              │
-│                              └────────────────────────────────────────────────────────┘                              │
+│                              ╰────────────────────────────────────────────────────────╯                              │
 │                                                                    ││                                                │
 │                                                                    ││                                                │
 │                                                                    ││                                                │
@@ -38,4 +38,4 @@ tinyverse tui  |  1 session(s)
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- y/enter  confirm |  n/esc  cancel | Starting tinyverse TUI | never refreshed
+ y/enter  confirm |  n/esc  cancel | Placholder Typing.... | never refreshed

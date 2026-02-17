@@ -1,29 +1,29 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 874
+assertion_line: 1452
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
 ╭ Sessions ──────────────────────────────────────────────────────────╮╭ Console ───────────────────────────────────────╮
-│ ┌ tinyverse_alpha ───────────────────────────────────────────────┐ ││ 1  Cons   2  Agent   3  Chat                   │
-│ │ key: tinyverse_alpha                                           │ ││Loading console preview...                      │
-│ │ active   opencode                                              │ ││                                                │
-│ │ tmux: tinyverse_alpha                                          │ ││                                                │
-│ │                                                                │ ││                                                │
-│ └────────────────────────────────────────────────────────────────┘ ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
-│                                                                    ││                                                │
+│                                                                    ││ 1  Cons   2  Agent   3  Chat                   │
+│  ┌ tinyverse_alpha ────────────── X ┐                              ││Loading console preview...                      │
+│  │ key: tinyverse_alpha             │                              ││                                                │
+│  │ active   opencode                │                              ││                                                │
+│  │ tmux: tinyverse_alpha            │                              ││                                                │
+│  │                                  │                              ││                                                │
+│  │                                  │                              ││                                                │
+│  │                                  │                              ││                                                │
+│  └──────────────────────────────────┘                              ││                                                │
 │                                     ╭ Actions ─────────────────────────────────╮                                     │
-│                                     │▸ s  Spawn new session                    │                                     │
-│                                     │r  Refresh sessions                       │                                     │
-│                                     │i  Toggle inspector                       │                                     │
-│                                     │a  Attach selected session                │                                     │
-│                                     │c  Send command to console pane           │                                     │
-│                                     │x  Kill selected session                  │                                     │
-│                                     │k  Kill all sessions                      │                                     │
-│                                     │q  Close menu                             │                                     │
+│                                     │ ▸  s  Spawn new session                  │                                     │
+│                                     │ r  Refresh sessions                      │                                     │
+│                                     │ i  Toggle inspector                      │                                     │
+│                                     │ a  Attach selected session               │                                     │
+│                                     │ c  Send command to console pane          │                                     │
+│                                     │ ───────────────────────────────────────  │                                     │
+│                                     │ x  Kill selected session                 │                                     │
+│                                     │ k  Kill all sessions                     │                                     │
+│                                     │ q Close menu                             │                                     │
 │                                     │                                          │                                     │
 │                                     │                                          │                                     │
 │                                     ╰──────────────────────────────────────────╯                                     │
@@ -38,4 +38,4 @@ tinyverse tui  |  1 session(s)
 │                                                                                                                      │
 │                                                                                                                      │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- enter  submit |  esc  cancel | Starting tinyverse TUI | never refreshed
+ enter  submit |  esc  cancel | Placholder Typing.... | never refreshed

@@ -14,9 +14,10 @@ use tinyverse_lib::{
 };
 
 use crate::app::{
-    App, AppMode, DividerDrag, FooterHotkeyAction, MENU_ACTIONS, MenuAction, PanePreview,
-    SidebarTab,
+    ACTION_MENU_DANGER_SPLIT_AFTER, App, AppMode, DividerDrag, FooterHotkeyAction, MENU_ACTIONS,
+    MenuAction, PanePreview, SidebarTab,
 };
+use crate::chat::ChatMessageRole;
 use crate::prefs::{self, TuiPrefs};
 
 use super::helpers::rect_contains;
@@ -36,11 +37,20 @@ pub(crate) fn handle_event(
         Event::Mouse(mouse) => handle_mouse_event(mouse, terminal, app, store)?,
         Event::Resize(_, _) => {
             app.layout.card_rects.clear();
+            app.layout.card_kill_rects.clear();
         }
         _ => {}
     }
 
     Ok(())
+}
+
+pub(crate) fn refresh_chat_bridge(app: &mut App, force: bool) {
+    if force {
+        app.chat_bridge.sync_now(&mut app.chat);
+    } else {
+        app.chat_bridge.sync_if_due(&mut app.chat);
+    }
 }
 
 fn handle_key_event(
@@ -51,6 +61,8 @@ fn handle_key_event(
 ) -> Result<()> {
     match app.mode {
         AppMode::Normal => match key {
+            _ if app.sidebar_tab == SidebarTab::Chat && handle_chat_key_event(key, app, store)? => {
+            }
             KeyCode::Esc | KeyCode::Char('q') => app.should_quit = true,
             KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('h') => {
                 app.select_prev();
@@ -174,16 +186,26 @@ fn handle_mouse_event(
     }
 
     if app.mode == AppMode::ActionMenu {
-        if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
-            if let Some(menu_rect) = app.layout.action_menu_rect {
-                if rect_contains(menu_rect, x, y) {
-                    if let Some(index) = action_menu_index_from_click(menu_rect, y) {
+        if let Some(menu_rect) = app.layout.action_menu_rect {
+            match mouse.kind {
+                MouseEventKind::Moved => {
+                    if rect_contains(menu_rect, x, y)
+                        && let Some(index) = action_menu_index_from_click(menu_rect, y)
+                    {
                         app.action_menu_index = index;
-                        execute_menu_action(MENU_ACTIONS[index], terminal, app, store)?;
                     }
-                } else {
-                    app.close_action_menu();
                 }
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if rect_contains(menu_rect, x, y) {
+                        if let Some(index) = action_menu_index_from_click(menu_rect, y) {
+                            app.action_menu_index = index;
+                            execute_menu_action(MENU_ACTIONS[index], terminal, app, store)?;
+                        }
+                    } else {
+                        app.close_action_menu();
+                    }
+                }
+                _ => {}
             }
         }
         return Ok(());
@@ -247,8 +269,18 @@ fn handle_mouse_event(
         return Ok(());
     }
 
+    if app.sidebar_tab == SidebarTab::Chat && handle_chat_mouse_event(mouse, app)? {
+        return Ok(());
+    }
+
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(index) = card_kill_index_from_position(x, y, app) {
+                app.selected_index = index;
+                refresh_selected_preview(app);
+                app.mode = AppMode::ConfirmKill;
+                return Ok(());
+            }
             if let Some(tab) = sidebar_tab_from_position(x, y, app) {
                 app.set_sidebar_tab(tab);
                 refresh_selected_preview(app);
@@ -271,10 +303,10 @@ fn handle_mouse_event(
             if let Some(index) = card_index_from_position(x, y, app) {
                 app.selected_index = index;
                 refresh_selected_preview(app);
-                app.mode = AppMode::ActionMenu;
-                app.action_menu_index = 0;
-                app.action_menu_anchor = Some((x, y));
             }
+            app.mode = AppMode::ActionMenu;
+            app.action_menu_index = 0;
+            app.action_menu_anchor = Some((x, y));
         }
         MouseEventKind::Drag(MouseButton::Left) => match app.dragging_divider {
             Some(DividerDrag::Vertical) => update_vertical_divider_ratio(x, app),
@@ -297,6 +329,465 @@ fn handle_mouse_event(
     }
 
     Ok(())
+}
+
+fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) -> Result<bool> {
+    if app.chat.is_model_selector_open() {
+        match key {
+            KeyCode::Esc => {
+                app.chat.close_model_selector();
+                app.status_message = String::from("Model selector closed");
+            }
+            KeyCode::Tab => {
+                app.chat.model_selector_toggle_raw_mode();
+                app.status_message = if app.chat.model_selector.raw_mode {
+                    String::from("Model selector raw mode")
+                } else {
+                    String::from("Model selector filter mode")
+                };
+            }
+            KeyCode::Up | KeyCode::Char('k') => app.chat.model_selector_move_up(),
+            KeyCode::Down | KeyCode::Char('j') => app.chat.model_selector_move_down(),
+            KeyCode::Backspace => app.chat.model_selector_backspace(),
+            KeyCode::Enter => {
+                if let Some(selected) = app.chat.confirm_model_selector() {
+                    app.status_message = format!("Model selected: {selected}");
+                } else {
+                    app.chat.close_model_selector();
+                    app.status_message = String::from("No model selected");
+                }
+            }
+            KeyCode::Char(c) => app.chat.model_selector_insert_char(c),
+            _ => {}
+        }
+        return Ok(true);
+    }
+
+    if app.chat.is_agent_selector_open() {
+        match key {
+            KeyCode::Esc => {
+                app.chat.close_agent_selector();
+                app.status_message = String::from("Agent selector closed");
+            }
+            KeyCode::Up | KeyCode::Char('k') => app.chat.agent_selector_move_up(),
+            KeyCode::Down | KeyCode::Char('j') => app.chat.agent_selector_move_down(),
+            KeyCode::Backspace => app.chat.agent_selector_backspace(),
+            KeyCode::Enter => {
+                if let Some(selected) = app.chat.confirm_agent_selector() {
+                    app.status_message = format!("Agent selected: {selected}");
+                } else {
+                    app.chat.close_agent_selector();
+                    app.status_message = String::from("No agent selected");
+                }
+            }
+            KeyCode::Char(c) => app.chat.agent_selector_insert_char(c),
+            _ => {}
+        }
+        return Ok(true);
+    }
+
+    if app.chat.is_autocomplete_open() {
+        match key {
+            KeyCode::Esc => {
+                app.chat.close_autocomplete();
+            }
+            KeyCode::Up | KeyCode::Char('k') => app.chat.autocomplete_move_up(),
+            KeyCode::Down | KeyCode::Char('j') => app.chat.autocomplete_move_down(),
+            KeyCode::Tab | KeyCode::Enter => {
+                let _ = app.chat.apply_autocomplete_selection();
+            }
+            _ => {}
+        }
+        return Ok(true);
+    }
+
+    if app.chat.composing {
+        match key {
+            KeyCode::Esc => {
+                app.chat.cancel_composer();
+                app.status_message = String::from("Compose cancelled");
+            }
+            KeyCode::Delete => app.chat.delete_char(),
+            KeyCode::Left => app.chat.move_cursor_left(),
+            KeyCode::Right => app.chat.move_cursor_right(),
+            KeyCode::Home => app.chat.move_cursor_home(),
+            KeyCode::End => app.chat.move_cursor_end(),
+            KeyCode::Enter => submit_chat_prompt(app, store)?,
+            KeyCode::Backspace => app.chat.backspace_char(),
+            KeyCode::Char('u') => app.chat.clear_draft(),
+            KeyCode::Char(c) => app.chat.insert_char(c),
+            _ => {}
+        }
+        return Ok(true);
+    }
+
+    match key {
+        KeyCode::Char('c') => {
+            app.chat.open_composer();
+            app.status_message = String::from("Compose mode enabled");
+            Ok(true)
+        }
+        KeyCode::Char('m') => {
+            app.chat.open_model_selector();
+            app.status_message = String::from("Model selector opened");
+            Ok(true)
+        }
+        KeyCode::Char('g') => {
+            app.chat.open_agent_selector();
+            app.status_message = String::from("Agent selector opened");
+            Ok(true)
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            app.chat.scroll_up(2);
+            Ok(true)
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            app.chat.scroll_down(2);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn handle_chat_mouse_event(mouse: MouseEvent, app: &mut App) -> Result<bool> {
+    let x = mouse.column;
+    let y = mouse.row;
+
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        && let Some(tab) = sidebar_tab_from_position(x, y, app)
+    {
+        app.set_sidebar_tab(tab);
+        return Ok(true);
+    }
+
+    if app.chat.is_model_selector_open() {
+        if let Some(popup) = app.layout.chat.model_selector_rect {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                if !rect_contains(popup, x, y) {
+                    app.chat.close_model_selector();
+                    app.status_message = String::from("Model selector closed");
+                    return Ok(true);
+                }
+
+                if let Some(query_rect) = app.layout.chat.model_selector_query_rect
+                    && rect_contains(query_rect, x, y)
+                    && !app.chat.model_selector.raw_mode
+                {
+                    app.chat.model_selector_toggle_raw_mode();
+                    app.status_message = String::from("Model selector raw mode");
+                    return Ok(true);
+                }
+
+                if let Some(list_rect) = app.layout.chat.model_selector_list_rect
+                    && rect_contains(list_rect, x, y)
+                {
+                    let row = y.saturating_sub(list_rect.y) as usize;
+                    let index = app.layout.chat.model_selector_list_start + row;
+                    app.chat.model_selector_set_selected(index);
+                    if let Some(selected) = app.chat.confirm_model_selector() {
+                        app.status_message = format!("Model selected: {selected}");
+                    }
+                }
+            }
+            if mouse.kind == MouseEventKind::ScrollUp {
+                app.chat.model_selector_move_up();
+            }
+            if mouse.kind == MouseEventKind::ScrollDown {
+                app.chat.model_selector_move_down();
+            }
+            return Ok(true);
+        }
+    }
+
+    if app.chat.is_agent_selector_open() {
+        if let Some(popup) = app.layout.chat.agent_selector_rect {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                if !rect_contains(popup, x, y) {
+                    app.chat.close_agent_selector();
+                    app.status_message = String::from("Agent selector closed");
+                    return Ok(true);
+                }
+
+                if let Some(list_rect) = app.layout.chat.agent_selector_list_rect
+                    && rect_contains(list_rect, x, y)
+                {
+                    let row = y.saturating_sub(list_rect.y) as usize;
+                    let index = app.layout.chat.agent_selector_list_start + row;
+                    app.chat.agent_selector_set_selected(index);
+                    if let Some(selected) = app.chat.confirm_agent_selector() {
+                        app.status_message = format!("Agent selected: {selected}");
+                    }
+                }
+            }
+            if mouse.kind == MouseEventKind::ScrollUp {
+                app.chat.agent_selector_move_up();
+            }
+            if mouse.kind == MouseEventKind::ScrollDown {
+                app.chat.agent_selector_move_down();
+            }
+            return Ok(true);
+        }
+    }
+
+    if app.chat.is_autocomplete_open() {
+        if let Some(popup) = app.layout.chat.autocomplete_rect {
+            if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+                if !rect_contains(popup, x, y) {
+                    app.chat.close_autocomplete();
+                    return Ok(true);
+                }
+
+                if let Some(list_rect) = app.layout.chat.autocomplete_list_rect
+                    && rect_contains(list_rect, x, y)
+                {
+                    let row = y.saturating_sub(list_rect.y) as usize;
+                    let index = app.layout.chat.autocomplete_list_start + row;
+                    app.chat.autocomplete_set_selected(index);
+                    let _ = app.chat.apply_autocomplete_selection();
+                }
+            }
+            if mouse.kind == MouseEventKind::ScrollUp {
+                app.chat.autocomplete_move_up();
+            }
+            if mouse.kind == MouseEventKind::ScrollDown {
+                app.chat.autocomplete_move_down();
+            }
+            return Ok(true);
+        }
+    }
+
+    match mouse.kind {
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(model_rect) = app.layout.chat.model_chip_rect
+                && rect_contains(model_rect, x, y)
+            {
+                app.chat.open_model_selector_at(x);
+                app.status_message = String::from("Model selector opened");
+                return Ok(true);
+            }
+            if let Some(agent_rect) = app.layout.chat.agent_chip_rect
+                && rect_contains(agent_rect, x, y)
+            {
+                app.chat.open_agent_selector_at(x);
+                app.status_message = String::from("Agent selector opened");
+                return Ok(true);
+            }
+            if let Some(input_rect) = app.layout.chat.composer_input_rect
+                && rect_contains(input_rect, x, y)
+            {
+                app.chat.open_composer();
+                return Ok(true);
+            }
+            if let Some(messages_rect) = app.layout.chat.messages_rect
+                && rect_contains(messages_rect, x, y)
+            {
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        MouseEventKind::ScrollUp => {
+            app.chat.scroll_up(2);
+            Ok(true)
+        }
+        MouseEventKind::ScrollDown => {
+            app.chat.scroll_down(2);
+            Ok(true)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn submit_chat_prompt(app: &mut App, store: &mut SessionStore) -> Result<()> {
+    let Some(prompt) = app.chat.take_prompt() else {
+        app.status_message = String::from("Prompt is empty");
+        return Ok(());
+    };
+
+    if let Some(local) = parse_local_chat_command(&prompt) {
+        app.chat.clear_after_send();
+        execute_local_chat_command(local, app, store)?;
+        return Ok(());
+    }
+
+    app.chat.push_message(ChatMessageRole::User, prompt.clone());
+
+    let outcome =
+        app.chat_bridge
+            .send_prompt(&prompt, &app.chat.active_model, &app.chat.active_agent);
+    if outcome.via_opencode {
+        app.chat
+            .push_message(ChatMessageRole::System, outcome.detail.clone());
+        app.chat.clear_after_send();
+        app.status_message = outcome.detail;
+        refresh_chat_bridge(app, true);
+        return Ok(());
+    }
+
+    let Some(session) = app.selected_session().cloned() else {
+        app.chat.push_message(
+            ChatMessageRole::System,
+            format!(
+                "{} No session selected; chat message kept local.",
+                outcome.detail
+            ),
+        );
+        app.chat.clear_after_send();
+        app.status_message = String::from("Chat message stored locally");
+        return Ok(());
+    };
+
+    let mut options = SendKeysOptions::new(session.tmux_session_name.clone(), prompt);
+    options.pane = Some(PaneTarget::Role(PanelRole::Agent));
+
+    match TmuxClient::new().send_keys(options) {
+        Ok(()) => {
+            app.chat.push_message(
+                ChatMessageRole::Assistant,
+                format!(
+                    "Dispatched to `{}` agent pane. Live stream binding is not wired yet.",
+                    session.session_name
+                ),
+            );
+            app.status_message = String::from("Prompt sent to agent pane");
+        }
+        Err(error) => {
+            app.chat
+                .push_message(ChatMessageRole::System, format!("Dispatch failed: {error}"));
+            app.status_message = format!("Prompt dispatch failed: {error}");
+        }
+    }
+
+    app.chat.clear_after_send();
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+enum LocalChatCommand {
+    Help,
+    Refresh,
+    New,
+    Clear,
+    Sessions,
+    Agent(String),
+    Model(String),
+    Grep(String),
+}
+
+fn parse_local_chat_command(prompt: &str) -> Option<LocalChatCommand> {
+    let trimmed = prompt.trim();
+    let command = trimmed.strip_prefix('/')?.trim();
+    if command.is_empty() {
+        return None;
+    }
+
+    let mut parts = command.splitn(2, char::is_whitespace);
+    let name = parts.next()?.trim().to_ascii_lowercase();
+    let arg = parts.next().map(str::trim).unwrap_or("");
+
+    match name.as_str() {
+        "help" => Some(LocalChatCommand::Help),
+        "refresh" => Some(LocalChatCommand::Refresh),
+        "new" | "new-session" => Some(LocalChatCommand::New),
+        "clear" => Some(LocalChatCommand::Clear),
+        "sessions" => Some(LocalChatCommand::Sessions),
+        "agent" if !arg.is_empty() => Some(LocalChatCommand::Agent(arg.to_owned())),
+        "model" if !arg.is_empty() => Some(LocalChatCommand::Model(arg.to_owned())),
+        "grep" if !arg.is_empty() => Some(LocalChatCommand::Grep(arg.to_owned())),
+        _ => None,
+    }
+}
+
+fn execute_local_chat_command(
+    command: LocalChatCommand,
+    app: &mut App,
+    store: &mut SessionStore,
+) -> Result<()> {
+    match command {
+        LocalChatCommand::Help => {
+            app.chat.push_message(
+                ChatMessageRole::System,
+                "Local commands: /help /refresh /new /clear /sessions /agent <name> /model <name> /grep <pattern>",
+            );
+            app.status_message = String::from("Displayed local chat help");
+        }
+        LocalChatCommand::Refresh => {
+            refresh_sessions_and_preview(app, store)?;
+            refresh_chat_bridge(app, true);
+            app.status_message = String::from("Refreshed sessions");
+        }
+        LocalChatCommand::New => {
+            app.reset_spawn_form();
+            app.mode = AppMode::SpawnInput;
+            app.status_message = String::from("Spawn dialog opened");
+        }
+        LocalChatCommand::Clear => {
+            app.chat.clear_messages();
+            app.status_message = String::from("Cleared local chat messages");
+        }
+        LocalChatCommand::Sessions => {
+            app.chat.push_message(
+                ChatMessageRole::System,
+                format!("Loaded session records: {}", app.sessions.len()),
+            );
+            app.status_message = String::from("Printed session count");
+        }
+        LocalChatCommand::Agent(agent) => {
+            if app.chat.set_active_agent(&agent).is_some() {
+                app.status_message = format!("Agent selected: {agent}");
+            } else {
+                app.status_message = format!("Unknown agent: {agent}");
+            }
+        }
+        LocalChatCommand::Model(model) => {
+            app.chat.set_active_model(&model);
+            app.status_message = format!("Model selected: {model}");
+        }
+        LocalChatCommand::Grep(pattern) => {
+            match run_local_grep_summary(app.chat.workspace_root(), &pattern) {
+                Ok(summary) => {
+                    app.chat
+                        .push_message(ChatMessageRole::System, summary.clone());
+                    app.status_message = summary;
+                }
+                Err(error) => {
+                    app.status_message = format!("Grep failed: {error}");
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn run_local_grep_summary(root: &Path, pattern: &str) -> Result<String> {
+    let output = Command::new("rg")
+        .arg("--line-number")
+        .arg("--max-count")
+        .arg("12")
+        .arg(pattern)
+        .arg(root)
+        .output()?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let hits = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .take(3)
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+
+    let status_code = output.status.code().unwrap_or_default();
+    if status_code != 0 && status_code != 1 {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Ok(format!("/grep failed ({status_code}): {}", stderr.trim()));
+    }
+
+    if hits.is_empty() {
+        Ok(format!("/grep no matches for `{pattern}`"))
+    } else {
+        Ok(format!("/grep {}", hits.join(" | ")))
+    }
 }
 
 fn sidebar_tab_from_position(x: u16, y: u16, app: &App) -> Option<SidebarTab> {
@@ -560,17 +1051,10 @@ pub(crate) fn refresh_selected_preview(app: &mut App) {
     };
 
     let session_target = SessionTarget::new(session.tmux_session_name);
-    let fit_size = app.layout.sidebar_preview_rect.and_then(|rect| {
-        if rect.width == 0 || rect.height == 0 {
-            None
-        } else {
-            Some((rect.width, rect.height))
-        }
-    });
     let client = TmuxClient::new();
 
-    let console = capture_preview_for_role(&client, &session_target, PanelRole::Console, fit_size);
-    let agent = capture_preview_for_role(&client, &session_target, PanelRole::Agent, fit_size);
+    let console = capture_preview_for_role(&client, &session_target, PanelRole::Console);
+    let agent = capture_preview_for_role(&client, &session_target, PanelRole::Agent);
 
     app.pane_preview_cache
         .insert(session.session_key, PanePreview { console, agent });
@@ -580,22 +1064,12 @@ fn capture_preview_for_role(
     client: &TmuxClient,
     session_target: &SessionTarget,
     role: PanelRole,
-    fit_size: Option<(u16, u16)>,
 ) -> String {
     let pane_request = PaneTarget::Role(role);
     let pane_id = match client.resolve_pane_id_for(session_target, Some(&pane_request)) {
         Ok(id) => id,
         Err(error) => return format!("Preview unavailable: {error}"),
     };
-
-    let mut original_size = None;
-    if let Some((fit_width, fit_height)) = fit_size
-        && fit_width > 0
-        && fit_height > 0
-    {
-        original_size = client.pane_size(&pane_id).ok();
-        let _ = client.resize_pane(&pane_id, Some(fit_width), Some(fit_height));
-    }
 
     let preview_text = {
         let mut options = CapturePaneOptions::new(session_target.clone());
@@ -607,10 +1081,6 @@ fn capture_preview_for_role(
             Err(error) => format!("Preview unavailable: {error}"),
         }
     };
-
-    if let Some((width, height)) = original_size {
-        let _ = client.resize_pane(&pane_id, Some(width), Some(height));
-    }
 
     if preview_text.trim().is_empty() {
         let mut fallback = CapturePaneOptions::new(session_target.clone());
@@ -838,16 +1308,24 @@ fn action_menu_index_from_click(menu_rect: ratatui::layout::Rect, y: u16) -> Opt
     }
 
     let row = y.saturating_sub(menu_rect.y + 1) as usize;
-    if row < MENU_ACTIONS.len() {
-        Some(row)
-    } else {
-        None
+    let separator_row = ACTION_MENU_DANGER_SPLIT_AFTER + 1;
+    if row == separator_row {
+        return None;
     }
+    let action_index = if row > separator_row { row - 1 } else { row };
+    (action_index < MENU_ACTIONS.len()).then_some(action_index)
 }
 
 fn card_index_from_position(x: u16, y: u16, app: &App) -> Option<usize> {
     app.layout
         .card_rects
+        .iter()
+        .find_map(|(index, rect)| rect_contains(*rect, x, y).then_some(*index))
+}
+
+fn card_kill_index_from_position(x: u16, y: u16, app: &App) -> Option<usize> {
+    app.layout
+        .card_kill_rects
         .iter()
         .find_map(|(index, rect)| rect_contains(*rect, x, y).then_some(*index))
 }

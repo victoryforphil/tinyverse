@@ -1,21 +1,20 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 863
 expression: snapshot
 ---
 tinyverse tui  |  0 session(s)
 ╭ Sessions ──────────────────────────────────────────────╮╭ Console ───────────────────────────────╮
+│                                                        ││ 1  Cons   2  Agent   3  Chat           │
 │                                                        ││No session selected                     │
 │                                                        ││                                        │
 │                                                        ││                                        │
 │                                                        ││                                        │
 │                                                        ││                                        │
-│                                                        ││                                        │
-│  ┌ TinyVerse ───────────────────────────────────────┐  ││                                        │
-│  │No sessions found.                                │  ││                                        │
-│  │Run `tinyverse spawn <name>` to create one.       │  ││                                        │
-│  │                                                  │  ││                                        │
-│  └──────────────────────────────────────────────────┘  ││                                        │
+│   ┌ TinyVerse ─────────────────────────────────────┐   ││                                        │
+│   │No sessions found.                              │   ││                                        │
+│   │Run `tinyverse spawn <name>` to create one.     │   ││                                        │
+│   │                                                │   ││                                        │
+│   └────────────────────────────────────────────────┘   ││                                        │
 │                                                        ││                                        │
 │                                                        ││                                        │
 │                                                        ││                                        │

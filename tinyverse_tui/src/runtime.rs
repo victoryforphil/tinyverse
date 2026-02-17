@@ -18,6 +18,7 @@ use tinyverse_lib::SessionStore;
 use crate::TuiRunOptions;
 use crate::app::App;
 use crate::prefs;
+use crate::theme::load_theme;
 
 const POLL_TIMEOUT: Duration = Duration::from_millis(120);
 
@@ -26,11 +27,13 @@ pub fn run(options: TuiRunOptions) -> Result<()> {
     store.reconcile_now()?;
 
     let mut app = App::new(options);
+    app.theme = load_theme();
     if let Ok(saved_prefs) = prefs::load() {
         saved_prefs.apply_to_spawn_form(&mut app.spawn_form);
     }
     app.refresh(&mut store)?;
     events::refresh_selected_preview(&mut app);
+    events::refresh_chat_bridge(&mut app, true);
 
     let mut terminal = setup_terminal()?;
     let run_result = run_loop(&mut terminal, &mut store, &mut app);
@@ -85,6 +88,7 @@ fn run_loop(
         if Instant::now() >= next_refresh_at {
             app.refresh(store)?;
             events::refresh_selected_preview(app);
+            events::refresh_chat_bridge(app, false);
             next_refresh_at = Instant::now() + app.options.refresh_interval;
         }
     }

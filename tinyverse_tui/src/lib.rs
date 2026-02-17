@@ -1,6 +1,9 @@
 mod app;
+mod chat;
+mod chat_bridge;
 mod prefs;
 mod runtime;
+mod theme;
 
 use std::time::Duration;
 

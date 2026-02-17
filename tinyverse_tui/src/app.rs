@@ -6,6 +6,11 @@ use ratatui::layout::Rect;
 use tinyverse_lib::{SessionStore, StoredSession};
 
 use crate::TuiRunOptions;
+use crate::chat::ChatState;
+use crate::chat_bridge::ChatBridge;
+use crate::theme::UiTheme;
+
+pub const DEFAULT_STATUS_PLACEHOLDER: &str = "Placholder Typing....";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
@@ -148,6 +153,27 @@ pub struct OverlayLayoutCache {
     pub prompt_editor_rect: Option<Rect>,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct ChatLayoutCache {
+    pub root_rect: Option<Rect>,
+    pub messages_rect: Option<Rect>,
+    pub composer_rect: Option<Rect>,
+    pub composer_input_rect: Option<Rect>,
+    pub model_chip_rect: Option<Rect>,
+    pub agent_chip_rect: Option<Rect>,
+    pub model_selector_rect: Option<Rect>,
+    pub model_selector_list_rect: Option<Rect>,
+    pub model_selector_query_rect: Option<Rect>,
+    pub model_selector_list_start: usize,
+    pub agent_selector_rect: Option<Rect>,
+    pub agent_selector_list_rect: Option<Rect>,
+    pub agent_selector_query_rect: Option<Rect>,
+    pub agent_selector_list_start: usize,
+    pub autocomplete_rect: Option<Rect>,
+    pub autocomplete_list_rect: Option<Rect>,
+    pub autocomplete_list_start: usize,
+}
+
 #[derive(Debug, Clone)]
 pub struct PanePreview {
     pub console: String,
@@ -201,6 +227,8 @@ pub const MENU_ACTIONS: [MenuAction; 8] = [
     MenuAction::CloseMenu,
 ];
 
+pub const ACTION_MENU_DANGER_SPLIT_AFTER: usize = 4;
+
 #[derive(Debug, Clone)]
 pub struct SpawnForm {
     pub session_name: String,
@@ -248,6 +276,7 @@ impl SpawnForm {
 #[derive(Debug, Default, Clone)]
 pub struct LayoutCache {
     pub card_rects: Vec<(usize, Rect)>,
+    pub card_kill_rects: Vec<(usize, Rect)>,
     pub body_rect: Option<Rect>,
     pub divider_x: Option<u16>,
     pub divider_y: Option<u16>,
@@ -257,10 +286,12 @@ pub struct LayoutCache {
     pub sidebar_tab_rects: Vec<(SidebarTab, Rect)>,
     pub sidebar_preview_rect: Option<Rect>,
     pub overlay: OverlayLayoutCache,
+    pub chat: ChatLayoutCache,
 }
 
 pub struct App {
     pub options: TuiRunOptions,
+    pub theme: UiTheme,
     pub sessions: Vec<StoredSession>,
     pub selected_index: usize,
     pub scroll_row: usize,
@@ -274,6 +305,8 @@ pub struct App {
     pub input_buffer: String,
     pub spawn_form: SpawnForm,
     pub sidebar_tab: SidebarTab,
+    pub chat: ChatState,
+    pub chat_bridge: ChatBridge,
     pub pane_preview_cache: HashMap<String, PanePreview>,
     pub footer_hover_action: Option<FooterHotkeyAction>,
     pub should_quit: bool,
@@ -286,6 +319,7 @@ impl App {
     pub fn new(options: TuiRunOptions) -> Self {
         Self {
             options,
+            theme: UiTheme::default(),
             sessions: Vec::new(),
             selected_index: 0,
             scroll_row: 0,
@@ -299,10 +333,12 @@ impl App {
             input_buffer: String::new(),
             spawn_form: SpawnForm::default(),
             sidebar_tab: SidebarTab::Console,
+            chat: ChatState::default(),
+            chat_bridge: ChatBridge::from_env(),
             pane_preview_cache: HashMap::new(),
             footer_hover_action: None,
             should_quit: false,
-            status_message: String::from("Starting tinyverse TUI"),
+            status_message: String::from(DEFAULT_STATUS_PLACEHOLDER),
             last_refresh_at: None,
             layout: LayoutCache::default(),
         }
@@ -320,7 +356,9 @@ impl App {
             if self.selected_index >= self.sessions.len() {
                 self.selected_index = self.sessions.len() - 1;
             }
-            self.status_message = format!("Loaded {} session(s)", self.sessions.len());
+            if self.status_message.trim().is_empty() || self.status_message == "No sessions found" {
+                self.status_message = String::from(DEFAULT_STATUS_PLACEHOLDER);
+            }
         }
         self.last_refresh_at = Some(Instant::now());
         Ok(())
@@ -359,16 +397,25 @@ impl App {
 
     pub fn next_sidebar_tab(&mut self) {
         self.sidebar_tab = self.sidebar_tab.next();
+        if self.sidebar_tab == SidebarTab::Chat {
+            self.chat_bridge.sync_now(&mut self.chat);
+        }
         self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
     }
 
     pub fn prev_sidebar_tab(&mut self) {
         self.sidebar_tab = self.sidebar_tab.prev();
+        if self.sidebar_tab == SidebarTab::Chat {
+            self.chat_bridge.sync_now(&mut self.chat);
+        }
         self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
     }
 
     pub fn set_sidebar_tab(&mut self, tab: SidebarTab) {
         self.sidebar_tab = tab;
+        if self.sidebar_tab == SidebarTab::Chat {
+            self.chat_bridge.sync_now(&mut self.chat);
+        }
         self.status_message = format!("Sidebar tab: {}", self.sidebar_tab.title());
     }
 

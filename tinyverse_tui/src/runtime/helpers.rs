@@ -1,16 +1,16 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders};
 
-pub const ACCENT_PRIMARY: Color = Color::Cyan;
-pub const ACCENT_SECONDARY: Color = Color::Blue;
-pub const TEXT_DIM: Color = Color::DarkGray;
-pub const TEXT_MUTED: Color = Color::Gray;
-pub const TEXT_NORMAL: Color = Color::White;
+use crate::theme::UiTheme;
 
-pub fn styled_panel(title: &str, accent: Color, focused: bool) -> Block<'static> {
-    let border_color = if focused { accent } else { Color::DarkGray };
+pub fn styled_panel(title: &str, focused: bool, theme: &UiTheme) -> Block<'static> {
+    let border_color = if focused {
+        theme.pane_focused_border
+    } else {
+        theme.pane_unfocused_border
+    };
     Block::default()
         .title(format!(" {title} "))
         .borders(Borders::ALL)
@@ -18,18 +18,18 @@ pub fn styled_panel(title: &str, accent: Color, focused: bool) -> Block<'static>
         .border_style(Style::default().fg(border_color))
         .title_style(
             Style::default()
-                .fg(TEXT_NORMAL)
+                .fg(theme.text_primary)
                 .add_modifier(Modifier::BOLD),
         )
 }
 
-pub fn status_pill(status: &str) -> Span<'static> {
+pub fn status_pill(status: &str, theme: &UiTheme) -> Span<'static> {
     let lowered = status.to_ascii_lowercase();
     let (fg, bg) = match lowered.as_str() {
-        "active" => (Color::Black, Color::Green),
-        "stale" => (Color::Black, Color::Yellow),
-        "dead" => (Color::White, Color::Red),
-        _ => (Color::White, Color::DarkGray),
+        "active" => (theme.pill_ok_fg, theme.pill_ok_bg),
+        "stale" => (theme.pill_warn_fg, theme.pill_warn_bg),
+        "dead" => (theme.pill_err_fg, theme.pill_err_bg),
+        _ => (theme.pill_muted_fg, theme.pill_muted_bg),
     };
     Span::styled(
         format!(" {} ", lowered),
@@ -37,10 +37,12 @@ pub fn status_pill(status: &str) -> Span<'static> {
     )
 }
 
-pub fn tag_pill(label: &str) -> Span<'static> {
+pub fn tag_pill(label: &str, theme: &UiTheme) -> Span<'static> {
     Span::styled(
         format!(" {} ", label),
-        Style::default().fg(Color::White).bg(Color::Blue),
+        Style::default()
+            .fg(theme.pill_accent_fg)
+            .bg(theme.pill_accent_bg),
     )
 }
 
@@ -95,18 +97,30 @@ pub fn inset_rect(area: Rect, horizontal: u16, vertical: u16) -> Rect {
     }
 }
 
-pub fn line_kv(label: &str, value: &str) -> Line<'static> {
+pub fn line_kv(label: &str, value: &str, theme: &UiTheme) -> Line<'static> {
     Line::from(vec![
-        Span::styled(format!("{}: ", label), Style::default().fg(TEXT_DIM)),
-        Span::raw(value.to_owned()),
+        Span::styled(
+            format!("{}: ", label),
+            Style::default().fg(theme.text_muted),
+        ),
+        Span::styled(value.to_owned(), Style::default().fg(theme.text_secondary)),
     ])
 }
 
-pub fn key_hint(key: &str, action: &str) -> Vec<Span<'static>> {
+pub fn key_hint(key: &str, action: &str, theme: &UiTheme) -> Vec<Span<'static>> {
     vec![
-        Span::styled(format!("[{key}]"), Style::default().fg(Color::Cyan)),
+        Span::styled(
+            format!(" {key} "),
+            Style::default()
+                .fg(theme.key_hint_key_fg)
+                .bg(theme.key_hint_key_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" "),
-        Span::styled(action.to_owned(), Style::default().fg(TEXT_MUTED)),
+        Span::styled(
+            action.to_owned(),
+            Style::default().fg(theme.key_hint_action_fg),
+        ),
     ]
 }
 
