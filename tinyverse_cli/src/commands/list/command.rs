@@ -1,12 +1,11 @@
+use super::args::ListArgs;
+use crate::commands::output::render_output;
 use anyhow::{Context, Result};
 use log::info;
 use prettytable::{Cell, Row, Table};
 use serde::Serialize;
 use tinyverse_lib::tmux::{ListSessionsOptions, TmuxClient};
 use tinyverse_lib::{SessionStore, StoredSession};
-
-use super::args::ListArgs;
-use crate::commands::output::render_output;
 
 #[derive(Debug, Serialize)]
 struct ListReport {

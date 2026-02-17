@@ -81,10 +81,14 @@
 
 ```bash
 # Spawn a new session with default agent
+# (defaults key to an available California city, e.g. tinyverse_san_bernardino)
 cargo run -p tinyverse_cli -- spawn
 
 # Spawn with a prompt string
 cargo run -p tinyverse_cli -- spawn --prompt "you are a helpful coding agent"
+
+# Spawn with an explicit key/name
+cargo run -p tinyverse_cli -- spawn --key my-session
 
 # List tinyverse sessions only (default)
 cargo run -p tinyverse_cli -- list

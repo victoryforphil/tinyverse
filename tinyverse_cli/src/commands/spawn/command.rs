@@ -1,16 +1,15 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use anyhow::{Context, Result};
 use log::info;
 use tinyverse_lib::tmux::{SpawnSessionOptions, TmuxClient};
 use tinyverse_lib::{CreateSessionInput, SessionStore};
 
 use super::args::SpawnArgs;
+use super::session_name::resolve_session_name;
 use crate::providers::{find_by_key, LaunchContext};
 
 pub fn execute(args: SpawnArgs) -> Result<()> {
     let mut store = SessionStore::open_default()?;
-    let session_name = default_session_name();
+    let session_name = resolve_session_name(args.key.as_deref(), &mut store)?;
     let prompt = resolve_prompt(args.prompt.as_deref())?;
     let provider = find_by_key(args.agent.as_str())
         .with_context(|| format!("unknown provider `{}`", args.agent))?;
@@ -55,16 +54,6 @@ pub fn execute(args: SpawnArgs) -> Result<()> {
 
     Ok(())
 }
-
-fn default_session_name() -> String {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis();
-
-    format!("tinyverse_{millis}")
-}
-
 fn resolve_prompt(prompt_arg: Option<&str>) -> Result<Option<String>> {
     let Some(prompt_arg) = prompt_arg else {
         return Ok(None);

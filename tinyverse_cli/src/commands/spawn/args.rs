@@ -2,6 +2,9 @@ use clap::Args;
 
 #[derive(Debug, Args)]
 pub struct SpawnArgs {
+    /// Optional session key/name
+    #[arg(long)]
+    pub key: Option<String>,
     /// Agent provider to use
     #[arg(long, default_value = "opencode")]
     pub agent: String,
