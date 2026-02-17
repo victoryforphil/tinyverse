@@ -1,4 +1,7 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
+use tinyverse_lib::TINYVERSE_DIR_HOME_ENV;
 
 use crate::commands::{
     attach::args::AttachArgs, config::command::ConfigCommands, debug::args::DebugCommands,
@@ -14,6 +17,10 @@ use crate::commands::{
     arg_required_else_help = true
 )]
 pub struct Cli {
+    /// Override tinyverse home directory (or a directory containing .tinyverse)
+    #[arg(long, global = true, env = TINYVERSE_DIR_HOME_ENV)]
+    pub tinyverse_dir_home: Option<PathBuf>,
+
     #[command(subcommand)]
     pub command: Commands,
 }

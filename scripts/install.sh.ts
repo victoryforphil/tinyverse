@@ -18,4 +18,16 @@ await runCommandSteps([
     args: [":install"],
     cwd: repoRoot,
   },
+  {
+    name: "Install Diesel CLI (sqlite)",
+    command: "cargo",
+    args: [
+      "install",
+      "diesel_cli",
+      "--no-default-features",
+      "--features",
+      "sqlite",
+    ],
+    cwd: repoRoot,
+  },
 ]);

@@ -10,6 +10,8 @@ target/
 
 .proto/
 
+.tinyverse/
+
 .moon/cache/
 .moon/docker/
 .moon/tasks/

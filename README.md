@@ -30,6 +30,15 @@
 
 - Root command: `tinyverse`
 - In this repo, run commands via: `cargo run -p tinyverse_cli -- <command>`
+- Global override for tinyverse home path:
+  - `--tinyverse-dir-home <path>`
+  - `TINYVERSE_DIR_HOME=<path>`
+- Tinyverse path resolution order:
+  1. `--tinyverse-dir-home`
+  2. `TINYVERSE_DIR_HOME`
+  3. repo-local `<repo_root>/.tinyverse` when running in this repo
+  4. cwd-local `.tinyverse` if present
+  5. `~/.tinyverse`
 
 ## Testing
 
@@ -48,22 +57,25 @@
 ### Commands
 
 - `list` // List tmux sessions known to tinyverse (defaults to tinyverse-only sessions).
-  - `--all` to include every tmux session
+  - Source of truth is the local tinyverse SQLite session DB.
+  - Reconciles DB sessions against tmux before reads (debounced/rate-limited).
+  - `--all` includes unmanaged tmux sessions in addition to DB sessions.
   - `--format={table|text|json}` (default: `table`)
 - `spawn` // Create a new tinyverse session (console + agent panes).
   - `--agent={opencode}`
   - `--prompt={file_or_string}`
   - `--agent_args={string}` (supports `{prompt}` placeholder)
-- `attach <session>` // Attach to an existing session by name/id.
-- `kill <session>` // Kill session by name/id.
+- `attach <session>` // Attach to an existing session by key or name.
+- `kill <session>` // Kill session by key or name.
 - `view` // Capture pane output.
-  - `--session={id}` (optional inside tmux, required outside tmux)
+  - `--session={key_or_name}` (optional inside tmux, required outside tmux)
   - `--panel={console|agent|%pane_id}`
 - `send <command>` // Send keys to pane.
-  - `--session={id}` (optional inside tmux, required outside tmux)
+  - `--session={key_or_name}` (optional inside tmux, required outside tmux)
   - `--panel={console|agent|%pane_id}`
 - `debug self` // Inspect current tmux context.
   - `--format={table|text|json}`
+- `debug reset-db` // Backup and reset local tinyverse session DB.
 
 ### Quick Copy/Paste Examples
 
@@ -80,6 +92,9 @@ cargo run -p tinyverse_cli -- list
 # List all tmux sessions
 cargo run -p tinyverse_cli -- list --all
 
+# Override tinyverse home path for this invocation
+cargo run -p tinyverse_cli -- --tinyverse-dir-home ./.tinyverse list
+
 # List as JSON (for scripting)
 cargo run -p tinyverse_cli -- list --format json
 
@@ -95,6 +110,9 @@ cargo run -p tinyverse_cli -- view --session tinyverse_123 --panel console
 # Debug current context as text/json
 cargo run -p tinyverse_cli -- debug self
 cargo run -p tinyverse_cli -- debug self --format json
+
+# Backup and reset session DB
+cargo run -p tinyverse_cli -- debug reset-db
 
 # Kill a session
 cargo run -p tinyverse_cli -- kill tinyverse_123

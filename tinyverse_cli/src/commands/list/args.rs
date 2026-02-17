@@ -4,7 +4,7 @@ use crate::commands::output::OutputFormat;
 
 #[derive(Debug, Args)]
 pub struct ListArgs {
-    /// Show all tmux sessions, not only tinyverse sessions
+    /// Include unmanaged tmux sessions alongside DB-backed sessions
     #[arg(long, default_value_t = false)]
     pub all: bool,
 

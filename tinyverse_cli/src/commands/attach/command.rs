@@ -1,8 +1,9 @@
 use std::io::IsTerminal;
 use std::process::{Command, Stdio};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use log::{error, info};
+use tinyverse_lib::SessionStore;
 
 use super::args::AttachArgs;
 
@@ -17,7 +18,15 @@ pub fn execute(args: AttachArgs) -> Result<()> {
         );
     }
 
-    let tmux_args = build_tmux_attach_args(std::env::var_os("TMUX").is_some(), &args.session);
+    let mut store = SessionStore::open_default()?;
+    let stored = store
+        .find_session(&args.session)?
+        .with_context(|| format!("unknown session `{}`", args.session))?;
+
+    let tmux_args = build_tmux_attach_args(
+        std::env::var_os("TMUX").is_some(),
+        &stored.tmux_session_name,
+    );
 
     let status = Command::new("tmux")
         .args(&tmux_args)
@@ -25,18 +34,24 @@ pub fn execute(args: AttachArgs) -> Result<()> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .with_context(|| format!("failed to run tmux for session `{}`", args.session))?;
+        .with_context(|| format!("failed to run tmux for session `{}`", stored.session_name))?;
 
     if !status.success() {
         error!(
             "Attach failed for session {} (exit code: {:?})",
-            args.session,
+            stored.session_name,
             status.code()
         );
-        bail!("failed to attach/switch to session `{}`", args.session);
+        bail!(
+            "failed to attach/switch to session `{}`",
+            stored.session_name
+        );
     }
 
-    info!("Attached to session {}", args.session);
+    info!(
+        "Attached to session {} (key={})",
+        stored.session_name, stored.session_key
+    );
 
     Ok(())
 }

@@ -1,6 +1,7 @@
 use std::process::Command;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
+use tinyverse_lib::SessionStore;
 use tinyverse_lib::tmux::{PaneTarget, SessionTarget};
 
 const LIST_PANES_FORMAT: &str = "#{pane_id}\t#{pane_index}\t#{pane_title}\t#{?pane_active,1,0}";
@@ -54,6 +55,23 @@ pub fn resolve_session_target(explicit_session: Option<&str>) -> Result<SessionT
     current_session_target()?.ok_or_else(|| {
         anyhow::anyhow!("session is required outside tmux; pass --session <id-or-name>")
     })
+}
+
+pub fn resolve_session_target_with_store(
+    explicit_session: Option<&str>,
+    store: &mut SessionStore,
+) -> Result<SessionTarget> {
+    if let Some(session) = explicit_session {
+        let trimmed = session.trim();
+        if !trimmed.is_empty() {
+            let stored = store
+                .find_session(trimmed)?
+                .with_context(|| format!("unknown session `{trimmed}`"))?;
+            return Ok(SessionTarget::new(stored.tmux_session_name));
+        }
+    }
+
+    resolve_session_target(None)
 }
 
 pub fn current_pane_id() -> Option<String> {

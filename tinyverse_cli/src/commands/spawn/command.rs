@@ -3,11 +3,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use log::info;
 use tinyverse_lib::tmux::{SpawnSessionOptions, TmuxClient};
+use tinyverse_lib::{CreateSessionInput, SessionStore};
 
 use super::args::SpawnArgs;
-use crate::providers::{find_by_key, LaunchContext};
+use crate::providers::{LaunchContext, find_by_key};
 
 pub fn execute(args: SpawnArgs) -> Result<()> {
+    let mut store = SessionStore::open_default()?;
     let session_name = default_session_name();
     let prompt = resolve_prompt(args.prompt.as_deref())?;
     let provider = find_by_key(args.agent.as_str())
@@ -35,6 +37,20 @@ pub fn execute(args: SpawnArgs) -> Result<()> {
     info!(
         "Panes: console={}, agent={}",
         result.console_pane_id, result.agent_pane_id
+    );
+
+    let stored = store.create_session(&CreateSessionInput {
+        session_name: session_name.clone(),
+        agent_type: args.agent.clone(),
+        description: None,
+        tmux_session_name: session_name,
+        tmux_session_id: None,
+        console_pane_id: Some(result.console_pane_id.clone()),
+        agent_pane_id: Some(result.agent_pane_id.clone()),
+    })?;
+    info!(
+        "Stored session metadata (key={}, status={})",
+        stored.session_key, stored.status_string
     );
 
     Ok(())

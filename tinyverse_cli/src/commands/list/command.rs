@@ -3,52 +3,64 @@ use log::info;
 use prettytable::{Cell, Row, Table};
 use serde::Serialize;
 use tinyverse_lib::tmux::{ListSessionsOptions, TmuxClient};
+use tinyverse_lib::{SessionStore, StoredSession};
 
 use super::args::ListArgs;
 use crate::commands::output::render_output;
 
-const TINYVERSE_SESSION_PREFIX: &str = "tinyverse_";
-
 #[derive(Debug, Serialize)]
 struct ListReport {
     showing_all: bool,
-    total_sessions: usize,
+    source_of_truth: &'static str,
     returned_sessions: usize,
     sessions: Vec<ListItem>,
 }
 
 #[derive(Debug, Serialize)]
 struct ListItem {
-    id: String,
+    session_key: Option<String>,
     name: String,
+    status: Option<String>,
     attached_clients: u32,
     windows: u32,
+    source: &'static str,
 }
 
 pub fn execute(args: ListArgs) -> Result<()> {
+    let mut store = SessionStore::open_default()?;
+    let db_sessions = store.list_sessions()?;
+
     let client = TmuxClient::new();
-    let mut sessions = client
+    let tmux_sessions = client
         .list_sessions(ListSessionsOptions)
         .context("failed to list tmux sessions")?;
 
-    let total_sessions = sessions.len();
-    if !args.all {
-        sessions.retain(|session| session.session_name.starts_with(TINYVERSE_SESSION_PREFIX));
+    let mut report_rows: Vec<ListItem> = db_sessions
+        .iter()
+        .map(|session| {
+            let tmux_match = tmux_sessions
+                .iter()
+                .find(|tmux| tmux.session_name == session.tmux_session_name);
+            ListItem {
+                session_key: Some(session.session_key.clone()),
+                name: session.session_name.clone(),
+                status: Some(session.status_string.clone()),
+                attached_clients: tmux_match.map(|value| value.attached_clients).unwrap_or(0),
+                windows: tmux_match.map(|value| value.windows).unwrap_or(0),
+                source: "db",
+            }
+        })
+        .collect();
+
+    if args.all {
+        append_unmanaged_tmux_sessions(&db_sessions, &tmux_sessions, &mut report_rows);
     }
 
     let report = ListReport {
         showing_all: args.all,
-        total_sessions,
-        returned_sessions: sessions.len(),
-        sessions: sessions
-            .into_iter()
-            .map(|session| ListItem {
-                id: session.session_id,
-                name: session.session_name,
-                attached_clients: session.attached_clients,
-                windows: session.windows,
-            })
-            .collect(),
+        source_of_truth: "tinyverse_db",
+        returned_sessions: report_rows.len(),
+        sessions: report_rows,
     };
 
     info!("Found {} session(s)", report.returned_sessions);
@@ -66,30 +78,27 @@ pub fn execute(args: ListArgs) -> Result<()> {
 
 fn format_text_report(report: &ListReport) -> String {
     if report.sessions.is_empty() {
-        return if report.showing_all {
-            "No sessions found.".to_owned()
-        } else {
-            format!(
-                "No tinyverse sessions found (prefix={TINYVERSE_SESSION_PREFIX}).\nUse --all to include every tmux session."
-            )
-        };
+        return "No tinyverse sessions found in database.".to_owned();
     }
 
     let mut lines = Vec::new();
-    lines.push("ID\tNAME\tATTACHED\tWINDOWS".to_owned());
+    lines.push("KEY\tNAME\tSTATUS\tATTACHED\tWINDOWS\tSOURCE".to_owned());
     for session in &report.sessions {
         lines.push(format!(
-            "{}\t{}\t{}\t{}",
-            session.id, session.name, session.attached_clients, session.windows
+            "{}\t{}\t{}\t{}\t{}\t{}",
+            session.session_key.as_deref().unwrap_or("-"),
+            session.name,
+            session.status.as_deref().unwrap_or("-"),
+            session.attached_clients,
+            session.windows,
+            session.source,
         ));
     }
 
-    if !report.showing_all {
-        lines.push(format!(
-            "Filtered to tinyverse sessions only (prefix={TINYVERSE_SESSION_PREFIX}, shown={}, total={})",
-            report.returned_sessions, report.total_sessions
-        ));
-    }
+    lines.push(format!(
+        "source_of_truth={} shown={} include_unmanaged_tmux={}",
+        report.source_of_truth, report.returned_sessions, report.showing_all
+    ));
 
     lines.join("\n")
 }
@@ -101,68 +110,93 @@ fn format_table_report(report: &ListReport) -> String {
 
     let mut table = Table::new();
     table.add_row(Row::new(vec![
-        Cell::new("ID"),
+        Cell::new("KEY"),
         Cell::new("NAME"),
+        Cell::new("STATUS"),
         Cell::new("ATTACHED"),
         Cell::new("WINDOWS"),
+        Cell::new("SOURCE"),
     ]));
 
     for session in &report.sessions {
         table.add_row(Row::new(vec![
-            Cell::new(&session.id),
+            Cell::new(session.session_key.as_deref().unwrap_or("-")),
             Cell::new(&session.name),
+            Cell::new(session.status.as_deref().unwrap_or("-")),
             Cell::new(&session.attached_clients.to_string()),
             Cell::new(&session.windows.to_string()),
+            Cell::new(session.source),
         ]));
     }
 
     let mut rendered = table.to_string();
-    if !report.showing_all {
-        rendered.push_str(&format!(
-            "\nFiltered to tinyverse sessions only (prefix={TINYVERSE_SESSION_PREFIX}, shown={}, total={})",
-            report.returned_sessions, report.total_sessions
-        ));
-    }
+    rendered.push_str(&format!(
+        "\nsource_of_truth={} shown={} include_unmanaged_tmux={}",
+        report.source_of_truth, report.returned_sessions, report.showing_all
+    ));
 
     rendered
 }
 
+fn append_unmanaged_tmux_sessions(
+    db_sessions: &[StoredSession],
+    tmux_sessions: &[tinyverse_lib::SessionSummary],
+    report_rows: &mut Vec<ListItem>,
+) {
+    for tmux_session in tmux_sessions {
+        let is_managed = db_sessions
+            .iter()
+            .any(|session| session.tmux_session_name == tmux_session.session_name);
+        if is_managed {
+            continue;
+        }
+
+        report_rows.push(ListItem {
+            session_key: None,
+            name: tmux_session.session_name.clone(),
+            status: None,
+            attached_clients: tmux_session.attached_clients,
+            windows: tmux_session.windows,
+            source: "tmux_unmanaged",
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{
-        format_table_report, format_text_report, ListItem, ListReport, TINYVERSE_SESSION_PREFIX,
-    };
+    use super::{ListItem, ListReport, format_table_report, format_text_report};
 
     #[test]
-    fn empty_filtered_text_mentions_all_flag() {
+    fn empty_report_has_clear_message() {
         let report = ListReport {
             showing_all: false,
-            total_sessions: 2,
+            source_of_truth: "tinyverse_db",
             returned_sessions: 0,
             sessions: Vec::new(),
         };
 
         let rendered = format_text_report(&report);
-        assert!(rendered.contains("--all"));
-        assert!(rendered.contains(TINYVERSE_SESSION_PREFIX));
+        assert!(rendered.contains("No tinyverse sessions found in database"));
     }
 
     #[test]
     fn table_render_includes_rows() {
         let report = ListReport {
             showing_all: true,
-            total_sessions: 1,
+            source_of_truth: "tinyverse_db",
             returned_sessions: 1,
             sessions: vec![ListItem {
-                id: "$1".to_owned(),
+                session_key: Some("tinyverse-1".to_owned()),
                 name: "tinyverse_1".to_owned(),
+                status: Some("active".to_owned()),
                 attached_clients: 0,
                 windows: 1,
+                source: "db",
             }],
         };
 
         let rendered = format_text_report(&report);
-        assert!(rendered.contains("ID\tNAME\tATTACHED\tWINDOWS"));
+        assert!(rendered.contains("KEY\tNAME\tSTATUS\tATTACHED\tWINDOWS\tSOURCE"));
         assert!(rendered.contains("tinyverse_1"));
     }
 
@@ -170,18 +204,20 @@ mod tests {
     fn pretty_table_render_includes_rows() {
         let report = ListReport {
             showing_all: true,
-            total_sessions: 1,
+            source_of_truth: "tinyverse_db",
             returned_sessions: 1,
             sessions: vec![ListItem {
-                id: "$1".to_owned(),
+                session_key: Some("tinyverse-1".to_owned()),
                 name: "tinyverse_1".to_owned(),
+                status: Some("active".to_owned()),
                 attached_clients: 0,
                 windows: 1,
+                source: "db",
             }],
         };
 
         let rendered = format_table_report(&report);
-        assert!(rendered.contains("ID"));
+        assert!(rendered.contains("KEY"));
         assert!(rendered.contains("tinyverse_1"));
     }
 }

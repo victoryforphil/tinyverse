@@ -7,6 +7,9 @@ pub enum DebugCommands {
     /// Inspect current tmux session and pane context
     #[command(name = "self")]
     SelfInfo(DebugSelfArgs),
+    /// Backup and reset local session database
+    #[command(name = "reset-db")]
+    ResetDb,
 }
 
 #[derive(Debug, Args)]

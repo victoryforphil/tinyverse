@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use nu_ansi_term::{Color, Style};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};

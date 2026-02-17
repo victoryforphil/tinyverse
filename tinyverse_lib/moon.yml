@@ -32,3 +32,27 @@ tasks:
       - "Cargo.toml"
       - "/Cargo.toml"
       - "/Cargo.lock"
+
+  db_setup:
+    command: "sh"
+    args:
+      [
+        "-c",
+        "mkdir -p ../.tinyverse && DATABASE_URL=../.tinyverse/tinyverse_sessions.sqlite3 diesel setup --migration-dir migrations --config-file diesel.toml",
+      ]
+
+  db_migrate:
+    command: "sh"
+    args:
+      [
+        "-c",
+        "mkdir -p ../.tinyverse && DATABASE_URL=../.tinyverse/tinyverse_sessions.sqlite3 diesel migration run --migration-dir migrations --config-file diesel.toml",
+      ]
+
+  db_generate_migration:
+    command: "sh"
+    args:
+      [
+        "-c",
+        "mkdir -p ../.tinyverse && DATABASE_URL=../.tinyverse/tinyverse_sessions.sqlite3 diesel migration generate",
+      ]

@@ -2,11 +2,14 @@ use anyhow::Result;
 use log::info;
 use serde::Serialize;
 use tinyverse_lib::tmux::SessionTarget;
+use tinyverse_lib::{
+    SessionStore, TinyverseHomeSource, reset_db_with_backup, resolve_tinyverse_paths,
+};
 
 use super::args::{DebugCommands, DebugSelfArgs};
 use crate::commands::output::render_output;
 use crate::commands::tmux_helpers::{
-    current_pane_id, current_session_target, list_pane_snapshots, PaneSnapshot,
+    PaneSnapshot, current_pane_id, current_session_target, list_pane_snapshots,
 };
 
 #[derive(Debug, Serialize)]
@@ -14,6 +17,9 @@ struct DebugSelfReport {
     in_tmux: bool,
     session: Option<String>,
     current_pane: Option<String>,
+    tinyverse_home: String,
+    tinyverse_db: String,
+    tinyverse_home_source: &'static str,
     panes: Vec<DebugPane>,
 }
 
@@ -28,7 +34,22 @@ struct DebugPane {
 pub fn execute(command: DebugCommands) -> Result<()> {
     match command {
         DebugCommands::SelfInfo(args) => execute_self(args),
+        DebugCommands::ResetDb => execute_reset_db(),
     }
+}
+
+fn execute_reset_db() -> Result<()> {
+    let store = SessionStore::open_default()?;
+    let report = reset_db_with_backup(store.paths())?;
+
+    if let Some(path) = report.backup_path.as_ref() {
+        info!("Database backup created at {}", path.display());
+    } else {
+        info!("No existing database found; created a fresh database");
+    }
+
+    info!("Database reset at {}", report.database_path.display());
+    Ok(())
 }
 
 fn execute_self(args: DebugSelfArgs) -> Result<()> {
@@ -38,8 +59,9 @@ fn execute_self(args: DebugSelfArgs) -> Result<()> {
         Some(session) => list_pane_snapshots(session)?,
         None => Vec::new(),
     };
+    let tinyverse_paths = resolve_tinyverse_paths(None)?;
 
-    let report = build_report(session, current_pane, panes);
+    let report = build_report(session, current_pane, panes, tinyverse_paths);
 
     info!("Collected debug info ({} pane(s))", report.panes.len());
 
@@ -53,6 +75,7 @@ fn build_report(
     session: Option<SessionTarget>,
     current_pane: Option<String>,
     panes: Vec<PaneSnapshot>,
+    tinyverse_paths: tinyverse_lib::TinyversePaths,
 ) -> DebugSelfReport {
     let pane_reports = panes
         .into_iter()
@@ -68,6 +91,15 @@ fn build_report(
         in_tmux: session.is_some(),
         session: session.map(|value| value.to_string()),
         current_pane,
+        tinyverse_home: tinyverse_paths.home_dir.display().to_string(),
+        tinyverse_db: tinyverse_paths.db_path.display().to_string(),
+        tinyverse_home_source: match tinyverse_paths.source {
+            TinyverseHomeSource::ArgOverride => "arg",
+            TinyverseHomeSource::EnvOverride => "env",
+            TinyverseHomeSource::RepoLocal => "repo_local",
+            TinyverseHomeSource::CwdLocal => "cwd_local",
+            TinyverseHomeSource::UserHome => "home",
+        },
         panes: pane_reports,
     }
 }
@@ -75,6 +107,12 @@ fn build_report(
 fn format_text_report(report: &DebugSelfReport) -> String {
     let mut lines = Vec::new();
     lines.push(format!("in_tmux: {}", report.in_tmux));
+    lines.push(format!("tinyverse_home: {}", report.tinyverse_home));
+    lines.push(format!("tinyverse_db: {}", report.tinyverse_db));
+    lines.push(format!(
+        "tinyverse_home_source: {}",
+        report.tinyverse_home_source
+    ));
 
     if let Some(session) = report.session.as_deref() {
         lines.push(format!("session: {session}"));
@@ -102,8 +140,8 @@ fn format_text_report(report: &DebugSelfReport) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_text_report, DebugSelfReport};
-    use crate::commands::output::{render_output, OutputFormat};
+    use super::{DebugSelfReport, format_text_report};
+    use crate::commands::output::{OutputFormat, render_output};
 
     #[test]
     fn text_render_contains_expected_fields() {
@@ -111,6 +149,9 @@ mod tests {
             in_tmux: false,
             session: None,
             current_pane: None,
+            tinyverse_home: "/tmp/.tinyverse".to_owned(),
+            tinyverse_db: "/tmp/.tinyverse/tinyverse_sessions.sqlite3".to_owned(),
+            tinyverse_home_source: "cwd_local",
             panes: Vec::new(),
         };
 
@@ -125,6 +166,9 @@ mod tests {
             in_tmux: false,
             session: None,
             current_pane: None,
+            tinyverse_home: "/tmp/.tinyverse".to_owned(),
+            tinyverse_db: "/tmp/.tinyverse/tinyverse_sessions.sqlite3".to_owned(),
+            tinyverse_home_source: "cwd_local",
             panes: Vec::new(),
         };
 
