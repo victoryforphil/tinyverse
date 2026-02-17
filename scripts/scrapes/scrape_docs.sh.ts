@@ -8,6 +8,7 @@ type SourceKey =
   | "elysia"
   | "prisma"
   | "moonrepo"
+  | "ratatui"
   | "ratatui_web"
   | "ratatui_docs"
   | "docsrs";
@@ -17,6 +18,7 @@ const SCRAPER_SCRIPT_BY_SOURCE: Record<SourceKey, string> = {
   elysia: "scripts/scrapes/scrape_elysia_docs.sh.ts",
   prisma: "scripts/scrapes/scrape_prisma_docs.sh.ts",
   moonrepo: "scripts/scrapes/scrape_moonrepo_docs.sh.ts",
+  ratatui: "scripts/scrapes/scrape_ratatui_docs.sh.ts",
   ratatui_web: "scripts/scrapes/scrape_ratatui_web_docs.sh.ts",
   ratatui_docs: "scripts/scrapes/scrape_ratatui_docs_docs.sh.ts",
   docsrs: "scripts/scrapes/scrape_docsrs_docs.sh.ts",

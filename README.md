@@ -23,13 +23,18 @@
 - If we need local session storage, use `sqlite` with `rusqlite` crate and some ODM abstraction (what ever is easiest to work with, maybe `sea-orm` or `diesel`)
 - Exposed REST and MCP APIs for agent interaction and control, using `warp` or `axum` for the server implementation
 - `thiserror` / `anyhow` for error handling in Rust
-- `log` + `pretty_env_logger` for logging in Rust
+- `log` + `tracing` + `tracing-subscriber` for logging in Rust
 
 
 ## CLI / Commands
 
 - Root command: `tinyverse`
 - In this repo, run commands via: `cargo run -p tinyverse_cli -- <command>`
+
+## Testing
+
+- Preferred Rust test runner: `cargo nextest run`
+- Fallback when `cargo-nextest` is unavailable or fails in this environment: `cargo test`
 
 ### Commands
 

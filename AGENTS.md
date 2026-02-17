@@ -34,11 +34,16 @@ Minimal guidance for coding agents in `tinyverse`.
 Current state:
 - No dedicated root build config.
 - No dedicated root lint config.
-- No tests currently present.
+- Rust CLI tests are available in `tinyverse_cli`.
+
+Testing preference:
+- Prefer `cargo nextest run` for Rust test execution.
+- If `cargo nextest` is unavailable or errors due to environment/tooling, fall back to `cargo test`.
 
 Operational commands:
 - Dispatch scraper: `scripts/scrapes/scrape_docs.sh.ts <source> [output_dir]`
 - Run scraper directly: `scripts/scrapes/scrape_<source>_docs.sh.ts [output_dir]`
+- Ratatui website scraper: `scripts/scrapes/scrape_docs.sh.ts ratatui [output_dir]`
 - Docs.rs scraper: `scripts/scrapes/scrape_docs.sh.ts docsrs [docs_rs_url] [output_dir]`
 
 Single-test note:
@@ -61,7 +66,8 @@ Single-test note:
 
 ## Logging
 
-- Preferred format: `System // Optional Sub system // Message (meta={...})`.
+- Prefer short, user-friendly messages at `info` level.
+- Keep verbose metadata for `debug`/`trace` when it materially aids troubleshooting.
 
 ## Verification Checklist
 

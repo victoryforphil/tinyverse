@@ -12,9 +12,13 @@ Until language/tool-specific configs exist, follow pragmatic defaults:
 - Keep naming consistent (`PascalCase` types, `camelCase` values/functions, `UPPER_SNAKE_CASE` constants).
 - Handle errors with context; do not swallow exceptions silently.
 - Never log secrets or credentials.
-- Log messages should follow: `System // Optional Sub system // Message (meta={...})`.
-  - Prefer structured JSON metadata over comma-delimited `key=value` text so long IDs/paths remain readable.
-  - Example: `Core // HTTP // Listening (meta={"env":"development","host":"127.0.0.1","port":4150})`.
+- Keep log output user-friendly by default, especially at `info` level.
+  - Prefer short, plain-language messages over deep prefixes.
+  - Prefer multi-line CLI output when it improves readability (for example, put follow-up guidance on a new line).
+  - Avoid metadata-heavy blobs unless they materially help debug failures.
+  - Reserve verbose context for `debug`/`trace` where possible.
+  - Example info: `Started session tinyverse_123 with OpenCode`.
+  - Example debug: `spawn details: session=tinyverse_123 prompt=true agent_args=false`.
 
 ## Rust CLI Module Layout
 
