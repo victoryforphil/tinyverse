@@ -21,6 +21,8 @@ Minimal guidance for coding agents in `tinyverse`.
 - Shared helpers: `scripts/helpers/`.
 - Scraper entrypoints: `scripts/scrapes/`.
 - Generated external docs: `docs/external/<source>/*.ext.md` plus `index.ext.md`.
+- Rust CLI: `tinyverse_cli/src/`.
+- Rust CLI commands: `tinyverse_cli/src/commands/<command>/`.
 
 ## Setup
 
@@ -52,6 +54,10 @@ Single-test note:
 - Prefer explicit types for exported contracts.
 - Throw contextual `Error` values; do not silently swallow errors.
 - Never log secrets or credentials.
+- For Rust CLI code, prefer folder modules with one command folder per command.
+- For Rust CLI command handlers, prefer `fn execute(args) -> anyhow::Result<()>`.
+- Keep Rust CLI structs/types close to one primary type per file where practical.
+- Prefer short imports and minimal namespace depth in Rust files (for example `SpawnArgs` via `use` or `super::args::SpawnArgs` instead of deep crate paths).
 
 ## Logging
 

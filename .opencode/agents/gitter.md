@@ -1,7 +1,7 @@
 ---
 description: Handles git status, diffs, and commits for the repo
 mode: subagent
-model: openrouter/google/gemini-3-flash-preview
+model: openrouter/x-ai/grok-4.1-fast
 tools:
   bash: true
   write: false
