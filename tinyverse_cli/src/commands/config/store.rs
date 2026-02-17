@@ -81,6 +81,9 @@ pub struct TmuxLayoutConfig {
 pub struct TuiConfig {
     #[serde(default = "default_tui_refresh_hz")]
     pub refresh_hz: u16,
+    /// Optional theme name or path. Resolved by the TUI at startup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -130,6 +133,7 @@ impl Default for TuiConfig {
     fn default() -> Self {
         Self {
             refresh_hz: default_tui_refresh_hz(),
+            theme: None,
         }
     }
 }
@@ -204,6 +208,7 @@ struct PartialTmuxLayoutConfig {
 #[derive(Debug, Default, Deserialize)]
 struct PartialTuiConfig {
     refresh_hz: Option<u16>,
+    theme: Option<String>,
 }
 
 pub fn load() -> Result<TinyverseConfig> {
@@ -357,11 +362,15 @@ fn apply_partial(target: &mut TinyverseConfig, partial: PartialTinyverseConfig) 
         }
     }
 
-    if let Some(tui) = tui
-        && let Some(refresh_hz) = tui.refresh_hz
-        && refresh_hz > 0
-    {
-        target.tui.refresh_hz = refresh_hz;
+    if let Some(tui) = tui {
+        if let Some(refresh_hz) = tui.refresh_hz
+            && refresh_hz > 0
+        {
+            target.tui.refresh_hz = refresh_hz;
+        }
+        if tui.theme.is_some() {
+            target.tui.theme = tui.theme;
+        }
     }
 }
 

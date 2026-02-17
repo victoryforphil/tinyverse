@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::{Args, ValueEnum};
 use serde::Serialize;
 use tinyverse_ui::{
-    ActionLine, LabeledField, Panel, StripeMode, StyledTable, SummaryFooter, Tone,
-    default_stdout_context,
+    default_stdout_context, ActionLine, LabeledField, Panel, StripeMode, StyledTable,
+    SummaryFooter, Tone,
 };
 
 use crate::commands::output::OutputFormat;
@@ -194,6 +194,20 @@ fn render_full_table_output(report: &ConfigPrintReport) -> String {
         .with_row(vec![
             "tmux.layout.secondary_percent".to_owned(),
             report.config.tmux.layout.secondary_percent.to_string(),
+        ])
+        .with_row(vec![
+            "tui.refresh_hz".to_owned(),
+            report.config.tui.refresh_hz.to_string(),
+        ])
+        .with_row(vec![
+            "tui.theme".to_owned(),
+            report
+                .config
+                .tui
+                .theme
+                .as_deref()
+                .unwrap_or("<unset>")
+                .to_owned(),
         ]);
 
     Panel::new(
@@ -210,7 +224,7 @@ fn render_full_table_output(report: &ConfigPrintReport) -> String {
                 .with_tone(Tone::Info)
                 .render(&context),
             String::new(),
-            SummaryFooter::new("10 config key(s)").render(&context),
+            SummaryFooter::new("12 config key(s)").render(&context),
         ]
         .join("\n"),
     )
@@ -241,7 +255,7 @@ fn render_raw_output(config: &store::TinyverseConfig, format: OutputFormat) -> R
 
 #[cfg(test)]
 mod tests {
-    use super::{ConfigPrintReport, render_full_output, render_raw_output};
+    use super::{render_full_output, render_raw_output, ConfigPrintReport};
     use crate::commands::config::store::{
         GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig, TuiConfig,
         WorkspaceConfig,

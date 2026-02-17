@@ -1,6 +1,6 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use clap::Args;
-use tinyverse_ui::{ActionLine, LabeledField, Panel, Tone, default_stdout_context};
+use tinyverse_ui::{default_stdout_context, ActionLine, LabeledField, Panel, Tone};
 
 use super::store;
 
@@ -53,8 +53,11 @@ pub fn execute(args: ConfigSetArgs) -> Result<()> {
         "tui.refresh_hz" => {
             config.tui.refresh_hz = parse_u16(value, key)?;
         }
+        "tui.theme" => {
+            config.tui.theme = parse_optional_string(value);
+        }
         _ => bail!(
-            "unknown config key `{key}` (supported: shell.clean, workspace.default_dir, git.branch_prefix, spawn.default_agent, spawn.default_model, tmux.initial_window_width, tmux.initial_window_height, tmux.layout.direction, tmux.layout.primary, tmux.layout.secondary_percent, tui.refresh_hz)"
+            "unknown config key `{key}` (supported: shell.clean, workspace.default_dir, git.branch_prefix, spawn.default_agent, spawn.default_model, tmux.initial_window_width, tmux.initial_window_height, tmux.layout.direction, tmux.layout.primary, tmux.layout.secondary_percent, tui.refresh_hz, tui.theme)"
         ),
     }
 

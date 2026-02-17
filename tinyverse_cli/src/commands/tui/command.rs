@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::Result;
-use tinyverse_tui::TuiRunOptions;
+use tinyverse_tui::{resolve_theme_selector, TuiRunOptions};
 
 use crate::commands::config::store;
 use crate::commands::tui::args::TuiArgs;
@@ -14,5 +14,10 @@ pub fn execute(args: TuiArgs) -> Result<()> {
         (None, None) => Duration::from_millis(1_000 / u64::from(config.tui.refresh_hz.max(1))),
     };
 
-    tinyverse_tui::run(TuiRunOptions { refresh_interval })
+    let theme = resolve_theme_selector(args.theme.as_deref(), config.tui.theme.as_deref());
+
+    tinyverse_tui::run(TuiRunOptions {
+        refresh_interval,
+        theme,
+    })
 }
