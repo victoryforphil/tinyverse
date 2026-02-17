@@ -72,9 +72,30 @@ pub fn pad_right(value: &str, width: usize) -> String {
     format!("{value:<width$}")
 }
 
+pub fn visible_width(value: &str) -> usize {
+    let mut chars = value.chars().peekable();
+    let mut width = 0usize;
+
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            let _ = chars.next();
+            for esc in chars.by_ref() {
+                if esc.is_ascii_alphabetic() {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        width += 1;
+    }
+
+    width
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{pad_right, truncate_with_ellipsis};
+    use super::{pad_right, truncate_with_ellipsis, visible_width};
 
     #[test]
     fn truncate_with_ellipsis_shortens_text() {
@@ -86,5 +107,11 @@ mod tests {
     fn pad_right_adds_spaces() {
         let output = pad_right("id", 4);
         assert_eq!(output, "id  ");
+    }
+
+    #[test]
+    fn visible_width_ignores_ansi_sequences() {
+        let output = visible_width("\u{1b}[31mERROR\u{1b}[0m details");
+        assert_eq!(output, 13);
     }
 }

@@ -1,7 +1,7 @@
 use std::io::IsTerminal;
 
 use anyhow::{anyhow, Context, Result};
-use tinyverse_ui::{ActionLine, DefaultTheme, ErrorBlock, RenderContext, RenderMode, Tone};
+use tinyverse_ui::{ActionLine, DefaultTheme, ErrorBlock, Panel, RenderContext, RenderMode, Tone};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::fmt::format::Writer;
@@ -63,7 +63,10 @@ where
                 error_block = error_block.with_guidance(guidance);
             }
 
-            writeln!(writer, "{}", error_block.render(&context))?;
+            let panel = Panel::new(error_block.render(&context))
+                .with_title("Error")
+                .with_tone(Tone::Error);
+            writeln!(writer, "{}", panel.render(&context))?;
 
             for line in message_lines {
                 writeln!(writer, "{} {}", continuation_prefix(), line)?;
@@ -77,6 +80,19 @@ where
         }
 
         let rendered_message = message_visitor.rendered_message();
+        if rendered_message.contains('\n') {
+            let panel = match *metadata.level() {
+                Level::WARN => Panel::new(rendered_message)
+                    .with_title(level_label(metadata.level()))
+                    .with_tone(Tone::Warning),
+                Level::ERROR => Panel::new(rendered_message)
+                    .with_title(level_label(metadata.level()))
+                    .with_tone(Tone::Error),
+                _ => Panel::new(rendered_message).with_title(level_label(metadata.level())),
+            };
+            writeln!(writer, "{}", panel.render(&context))?;
+            return Ok(());
+        }
         let mut lines = rendered_message.lines();
 
         if let Some(first_line) = lines.next() {

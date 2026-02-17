@@ -19,6 +19,8 @@ pub trait Theme {
     fn table_header_style(&self) -> Style;
     fn table_stripe_style(&self) -> Style;
     fn dim_style(&self) -> Style;
+    fn panel_border_style(&self) -> Style;
+    fn panel_border_tone_style(&self, tone: Tone) -> Style;
     fn tone_badge_style(&self, tone: Tone) -> Style;
     fn tone_text_style(&self, tone: Tone) -> Style;
 }
@@ -54,6 +56,20 @@ impl Theme for DefaultTheme {
 
     fn dim_style(&self) -> Style {
         Style::new().dimmed()
+    }
+
+    fn panel_border_style(&self) -> Style {
+        Style::new().dimmed()
+    }
+
+    fn panel_border_tone_style(&self, tone: Tone) -> Style {
+        match tone {
+            Tone::Neutral => Style::new().dimmed(),
+            Tone::Info => Style::new().fg(Color::Blue).bold(),
+            Tone::Success => Style::new().fg(Color::Green).bold(),
+            Tone::Warning => Style::new().fg(Color::Yellow).bold(),
+            Tone::Error => Style::new().fg(Color::Red).bold(),
+        }
     }
 
     fn tone_badge_style(&self, tone: Tone) -> Style {
@@ -108,6 +124,14 @@ impl Theme for MinimalTheme {
 
     fn dim_style(&self) -> Style {
         Style::new()
+    }
+
+    fn panel_border_style(&self) -> Style {
+        Style::new().bold()
+    }
+
+    fn panel_border_tone_style(&self, _tone: Tone) -> Style {
+        Style::new().bold()
     }
 
     fn tone_badge_style(&self, _tone: Tone) -> Style {

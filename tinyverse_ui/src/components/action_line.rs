@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::render::RenderMode;
-use crate::render::{RenderContext, pad_right};
+use crate::render::{pad_right, RenderContext};
 use crate::theme::Tone;
 
 pub struct ActionLine<'a> {
