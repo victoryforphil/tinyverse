@@ -332,6 +332,21 @@ fn handle_mouse_event(
 }
 
 fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) -> Result<bool> {
+    if app.chat.is_detail_modal_open() {
+        match key {
+            KeyCode::Esc | KeyCode::Enter => {
+                app.chat.close_detail_modal();
+                app.status_message = String::from("Detail view closed");
+            }
+            KeyCode::Up | KeyCode::Char('k') => app.chat.detail_scroll_up(2),
+            KeyCode::Down | KeyCode::Char('j') => app.chat.detail_scroll_down(2),
+            KeyCode::PageUp => app.chat.detail_scroll_up(8),
+            KeyCode::PageDown => app.chat.detail_scroll_down(8),
+            _ => {}
+        }
+        return Ok(true);
+    }
+
     if app.chat.is_model_selector_open() {
         match key {
             KeyCode::Esc => {
@@ -446,6 +461,32 @@ fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) 
             };
             Ok(true)
         }
+        KeyCode::Enter => {
+            if app.chat.open_detail_modal_for_focused() {
+                app.status_message = String::from("Opened detail view");
+                return Ok(true);
+            }
+            if let Some(first) = app.layout.chat.part_toggle_hitboxes.first() {
+                app.chat.open_detail_modal_for_part(first.part_key.clone());
+                app.status_message = String::from("Opened detail view");
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        KeyCode::Tab => {
+            if focus_next_chat_part(app) {
+                app.status_message = String::from("Focused next detail section");
+                return Ok(true);
+            }
+            Ok(false)
+        }
+        KeyCode::BackTab => {
+            if focus_prev_chat_part(app) {
+                app.status_message = String::from("Focused previous detail section");
+                return Ok(true);
+            }
+            Ok(false)
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             app.chat.scroll_up(2);
             Ok(true)
@@ -461,6 +502,34 @@ fn handle_chat_key_event(key: KeyCode, app: &mut App, store: &mut SessionStore) 
 fn handle_chat_mouse_event(mouse: MouseEvent, app: &mut App) -> Result<bool> {
     let x = mouse.column;
     let y = mouse.row;
+
+    if app.chat.is_detail_modal_open() {
+        if let Some(popup) = app.layout.chat.detail_modal_rect {
+            match mouse.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if !rect_contains(popup, x, y) {
+                        app.chat.close_detail_modal();
+                        app.status_message = String::from("Detail view closed");
+                    }
+                    return Ok(true);
+                }
+                MouseEventKind::Down(MouseButton::Right) => {
+                    app.chat.close_detail_modal();
+                    app.status_message = String::from("Detail view closed");
+                    return Ok(true);
+                }
+                MouseEventKind::ScrollUp => {
+                    app.chat.detail_scroll_up(2);
+                    return Ok(true);
+                }
+                MouseEventKind::ScrollDown => {
+                    app.chat.detail_scroll_down(2);
+                    return Ok(true);
+                }
+                _ => return Ok(true),
+            }
+        }
+    }
 
     if mouse.kind == MouseEventKind::Down(MouseButton::Left)
         && let Some(tab) = sidebar_tab_from_position(x, y, app)
@@ -566,7 +635,8 @@ fn handle_chat_mouse_event(mouse: MouseEvent, app: &mut App) -> Result<bool> {
     }
 
     match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => {
+        MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Down(MouseButton::Right) => {
+            let right_click = mouse.kind == MouseEventKind::Down(MouseButton::Right);
             if let Some(model_rect) = app.layout.chat.model_chip_rect
                 && rect_contains(model_rect, x, y)
             {
@@ -589,8 +659,14 @@ fn handle_chat_mouse_event(mouse: MouseEvent, app: &mut App) -> Result<bool> {
             }
             for hitbox in &app.layout.chat.part_toggle_hitboxes {
                 if rect_contains(hitbox.rect, x, y) {
-                    app.chat.toggle_part_expansion(hitbox.part_key.clone());
-                    app.status_message = String::from("Toggled detail section");
+                    app.chat.set_focused_part_key(Some(hitbox.part_key.clone()));
+                    if right_click {
+                        app.chat.open_detail_modal_for_part(hitbox.part_key.clone());
+                        app.status_message = String::from("Opened detail view");
+                    } else {
+                        app.chat.toggle_part_expansion(hitbox.part_key.clone());
+                        app.status_message = String::from("Toggled detail section");
+                    }
                     return Ok(true);
                 }
             }
@@ -1062,13 +1138,25 @@ fn refresh_sessions_and_preview(app: &mut App, store: &mut SessionStore) -> Resu
 }
 
 pub(crate) fn refresh_selected_preview(app: &mut App) {
+    let client = TmuxClient::new();
+
+    if app.show_card_preview_on_all_cards {
+        for session in app.sessions.iter().cloned() {
+            let session_target = SessionTarget::new(session.tmux_session_name);
+            let console = capture_preview_for_role(&client, &session_target, PanelRole::Console);
+            let agent = capture_preview_for_role(&client, &session_target, PanelRole::Agent);
+
+            app.pane_preview_cache
+                .insert(session.session_key, PanePreview { console, agent });
+        }
+        return;
+    }
+
     let Some(session) = app.selected_session().cloned() else {
         return;
     };
 
     let session_target = SessionTarget::new(session.tmux_session_name);
-    let client = TmuxClient::new();
-
     let console = capture_preview_for_role(&client, &session_target, PanelRole::Console);
     let agent = capture_preview_for_role(&client, &session_target, PanelRole::Agent);
 
@@ -1246,6 +1334,64 @@ fn resolve_prompt_input(input: &str) -> String {
     }
 
     trimmed.to_owned()
+}
+
+fn focus_next_chat_part(app: &mut App) -> bool {
+    let keys = app
+        .layout
+        .chat
+        .part_toggle_hitboxes
+        .iter()
+        .map(|hitbox| hitbox.part_key.as_str())
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return false;
+    }
+
+    let current = app.chat.focused_part_key();
+    let next = if let Some(current) = current {
+        keys.iter()
+            .position(|key| *key == current)
+            .map(|index| (index + 1) % keys.len())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    app.chat.set_focused_part_key(Some(keys[next].to_owned()));
+    true
+}
+
+fn focus_prev_chat_part(app: &mut App) -> bool {
+    let keys = app
+        .layout
+        .chat
+        .part_toggle_hitboxes
+        .iter()
+        .map(|hitbox| hitbox.part_key.as_str())
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        return false;
+    }
+
+    let current = app.chat.focused_part_key();
+    let prev = if let Some(current) = current {
+        keys.iter()
+            .position(|key| *key == current)
+            .map(|index| {
+                if index == 0 {
+                    keys.len() - 1
+                } else {
+                    index - 1
+                }
+            })
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    app.chat.set_focused_part_key(Some(keys[prev].to_owned()));
+    true
 }
 
 fn save_spawn_prefs(app: &App) {

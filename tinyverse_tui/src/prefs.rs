@@ -132,9 +132,8 @@ mod tests {
 
     #[test]
     fn parses_preview_scope_flag() {
-        let prefs = parse_prefs(
-            "spawn_agent = \"opencode\"\nshow_card_preview_on_all_cards = true\n",
-        );
+        let prefs =
+            parse_prefs("spawn_agent = \"opencode\"\nshow_card_preview_on_all_cards = true\n");
 
         assert_eq!(prefs.spawn_agent.as_deref(), Some("opencode"));
         assert_eq!(prefs.show_card_preview_on_all_cards, Some(true));

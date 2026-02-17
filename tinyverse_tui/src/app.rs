@@ -5,10 +5,10 @@ use anyhow::Result;
 use ratatui::layout::Rect;
 use tinyverse_lib::{SessionStore, StoredSession};
 
+use crate::TuiRunOptions;
 use crate::chat::ChatState;
 use crate::chat_bridge::ChatBridge;
 use crate::theme::UiTheme;
-use crate::TuiRunOptions;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AppMode {
@@ -170,6 +170,8 @@ pub struct ChatLayoutCache {
     pub autocomplete_rect: Option<Rect>,
     pub autocomplete_list_rect: Option<Rect>,
     pub autocomplete_list_start: usize,
+    pub detail_modal_rect: Option<Rect>,
+    pub detail_modal_body_rect: Option<Rect>,
     pub part_toggle_hitboxes: Vec<ChatPartToggleHitbox>,
 }
 

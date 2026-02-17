@@ -970,12 +970,6 @@ fn extract_message_parts(value: &Value) -> Vec<ChatMessagePart> {
 
                 let input_value = state.get("input").or_else(|| part.get("input"));
                 let output_value = state.get("output").or_else(|| part.get("output"));
-                let status = state
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToOwned::to_owned);
 
                 if matches!(name.as_str(), "bash" | "shell" | "terminal") {
                     let command = input_value
@@ -1006,10 +1000,6 @@ fn extract_message_parts(value: &Value) -> Vec<ChatMessagePart> {
                             });
                         }
                     }
-
-                    if let Some(status) = status {
-                        output.push(ChatMessagePart::Text(format!("shell status: {status}")));
-                    }
                 } else {
                     let input = input_value
                         .map(pretty_json)
@@ -1018,17 +1008,6 @@ fn extract_message_parts(value: &Value) -> Vec<ChatMessagePart> {
                         .map(pretty_json)
                         .filter(|value| !value.trim().is_empty());
 
-                    let mut input = input;
-                    if let Some(status) = status {
-                        let status_line = format!("status: {status}");
-                        input = Some(match input {
-                            Some(existing) if !existing.trim().is_empty() => {
-                                format!("{status_line}\n{existing}")
-                            }
-                            _ => status_line,
-                        });
-                    }
-
                     output.push(ChatMessagePart::ToolCall {
                         name,
                         input,
@@ -1036,6 +1015,7 @@ fn extract_message_parts(value: &Value) -> Vec<ChatMessagePart> {
                     });
                 }
             }
+            _ if part_type == "step-finish" => {}
             _ if part_type == "patch" => {
                 let files = part
                     .get("files")

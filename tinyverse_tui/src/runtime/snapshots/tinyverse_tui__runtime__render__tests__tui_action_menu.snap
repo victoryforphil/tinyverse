@@ -1,19 +1,19 @@
 ---
 source: tinyverse_tui/src/runtime/render.rs
-assertion_line: 1938
+assertion_line: 1184
 expression: snapshot
 ---
 tinyverse tui  |  1 session(s)
 ╭ Sessions ──────────────────────────────────────────────────────────╮╭ Console ───────────────────────────────────────╮
 │                                                                    ││ 1  Cons   2  Agent   3  Chat                   │
-│  ┌ tinyverse_alpha ────────────── X ┐                              ││Loading console preview...                      │
-│  │  active   opencode               │                              ││                                                │
-│  │ openai/gpt-5.3-codex  0 msgs     │                              ││                                                │
-│  │                                  │                              ││                                                │
-│  │                                  │                              ││                                                │
-│  │                                  │                              ││                                                │
-│  │                                  │                              ││                                                │
-│  │                                  │                              ││                                                │
+│  ┌ tinyverse_alpha ────────────────────────────────────────── X ┐  ││Loading console preview...                      │
+│  │  active   opencode                                           │  ││                                                │
+│  │  openai/gpt-5.3-codex   0 msgs                               │  ││                                                │
+│  │                                                              │  ││                                                │
+│  │                                                              │  ││                                                │
+│  │                                                              │  ││                                                │
+│  │                                                              │  ││                                                │
+│  │                                                              │  ││                                                │
 │  │                                  ╭ Actions ─────────────────────────────────╮                                     │
 │  └ Jan 01 00:00 · unknown ──────────│ ▸  s  Spawn new session                  │                                     │
 │                                     │ r  Refresh sessions                      │                                     │

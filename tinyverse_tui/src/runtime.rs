@@ -1,3 +1,4 @@
+mod chat_render;
 mod events;
 mod helpers;
 mod render;

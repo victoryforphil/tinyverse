@@ -6,27 +6,21 @@ use ratatui::widgets::{Block, Borders, Cell, Clear, Paragraph, Row, Table, Wrap}
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::app::{
-    ACTION_MENU_DANGER_SPLIT_AFTER, App, AppMode, ChatPartToggleHitbox, FooterHotkeyAction,
-    MENU_ACTIONS, MenuAction, SidebarTab,
+    ACTION_MENU_DANGER_SPLIT_AFTER, App, AppMode, FooterHotkeyAction, MENU_ACTIONS, MenuAction,
+    SidebarTab,
 };
-use crate::chat::{ChatMessagePart, ChatMessageRole, ComposerAutocompleteMode};
+use crate::chat::ChatMessageRole;
 
+use super::chat_render::render_chat_tab;
 use super::helpers::{
     anchored_rect, centered_rect, inset_rect, key_hint, pill_badge, status_pill, styled_panel,
     tag_pill, truncate_to,
 };
 
-const CARD_WIDTH: u16 = 36;
 const CARD_HEIGHT: u16 = 10;
 const CARD_GAP_X: u16 = 2;
 const CARD_GAP_Y: u16 = 1;
-const CHAT_COMPOSER_HEIGHT: u16 = 6;
-const CHAT_POPUP_MAX_VISIBLE: usize = 8;
-
-struct RenderedChatLine {
-    line: Line<'static>,
-    toggle_key: Option<String>,
-}
+const CARD_MIN_GRID_WIDTH: u16 = 34;
 
 pub(crate) fn render_frame(frame: &mut Frame, app: &mut App) {
     let root = frame.area();
@@ -150,9 +144,10 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         return;
     }
 
-    let stride_x = CARD_WIDTH + CARD_GAP_X;
+    let session_count = app.sessions.len();
+    let (cols, card_width) = card_grid_layout(inner.width, session_count);
+    let stride_x = card_width + CARD_GAP_X;
     let stride_y = CARD_HEIGHT + CARD_GAP_Y;
-    let cols = ((inner.width + CARD_GAP_X) / stride_x).max(1);
     let cols_usize = cols as usize;
     let visible_rows = ((inner.height + CARD_GAP_Y) / stride_y).max(1) as usize;
     let selected_row = app.selected_index / cols_usize;
@@ -187,7 +182,7 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
             break;
         }
 
-        let width = CARD_WIDTH.min(inner.right().saturating_sub(x));
+        let width = card_width.min(inner.right().saturating_sub(x));
         if width < 20 {
             continue;
         }
@@ -284,12 +279,14 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
                 tag_pill(&truncate_to(&session.agent_type, 12), &app.theme),
             ]),
             Line::from(vec![
-                Span::styled(
-                    truncate_to(
+                pill_badge(
+                    &truncate_to(
                         &app.chat.active_model,
                         card_area.width.saturating_sub(16).max(8) as usize,
                     ),
-                    Style::default().fg(app.theme.text_secondary),
+                    app.theme.pill_info_fg,
+                    app.theme.pill_info_bg,
+                    false,
                 ),
                 Span::raw(" "),
                 pill_badge(
@@ -322,13 +319,16 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
         }
 
         let should_show_preview = is_selected || app.show_card_preview_on_all_cards;
-        if should_show_preview && let Some(preview_text) = latest_assistant_preview(app) {
+        if should_show_preview
+            && let Some(preview_text) = card_preview_source_text(app, &session.session_key)
+        {
             let preview_line_count = if is_selected { 3 } else { 1 };
             card_lines.push(Line::from(Span::styled(
                 "─".repeat(max_preview_width.min(card_inner.width as usize)),
                 Style::default().fg(app.theme.pane_unfocused_border),
             )));
-            for line in preview_excerpt_lines(&preview_text, max_preview_width, preview_line_count) {
+            for line in preview_excerpt_lines(&preview_text, max_preview_width, preview_line_count)
+            {
                 card_lines.push(Line::from(Span::styled(
                     format!("{line}"),
                     if is_selected {
@@ -348,6 +348,35 @@ fn render_cards(frame: &mut Frame, area: Rect, app: &mut App) {
 
         frame.render_widget(body, card_inner);
     }
+}
+
+fn card_grid_layout(inner_width: u16, session_count: usize) -> (u16, u16) {
+    if inner_width == 0 {
+        return (1, 0);
+    }
+
+    let three_col_min = CARD_MIN_GRID_WIDTH.saturating_mul(3) + CARD_GAP_X.saturating_mul(2);
+    let two_col_min = CARD_MIN_GRID_WIDTH.saturating_mul(2) + CARD_GAP_X;
+
+    let mut cols: u16 = if inner_width >= three_col_min {
+        3
+    } else if inner_width >= two_col_min {
+        2
+    } else {
+        1
+    };
+
+    if session_count <= 1 {
+        cols = 1;
+    }
+
+    if cols == 1 {
+        return (1, inner_width);
+    }
+
+    let total_gap = CARD_GAP_X.saturating_mul(cols.saturating_sub(1));
+    let width = inner_width.saturating_sub(total_gap) / cols;
+    (cols, width)
 }
 
 fn render_sidebar(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -595,800 +624,6 @@ fn render_sidebar_tabs(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
-fn render_chat_tab(frame: &mut Frame, area: Rect, app: &mut App) {
-    app.layout.chat = Default::default();
-    app.layout.chat.root_rect = Some(area);
-
-    if area.width < 24 || area.height < 8 {
-        frame.render_widget(
-            Paragraph::new("Chat panel is too small")
-                .style(Style::default().fg(app.theme.text_muted)),
-            area,
-        );
-        return;
-    }
-
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(3), Constraint::Length(CHAT_COMPOSER_HEIGHT)])
-        .split(area);
-    let messages_area = rows[0];
-    let composer_area = rows[1];
-    app.layout.chat.messages_rect = Some(messages_area);
-    app.layout.chat.composer_rect = Some(composer_area);
-
-    render_chat_messages(frame, messages_area, app);
-    render_chat_composer(frame, composer_area, app);
-    render_model_selector_popup(frame, area, composer_area, app);
-    render_agent_selector_popup(frame, area, composer_area, app);
-    render_autocomplete_popup(frame, area, composer_area, app);
-}
-
-fn render_chat_messages(frame: &mut Frame, area: Rect, app: &mut App) {
-    let block = Block::default()
-        .title(" Messages ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.pane_unfocused_border));
-    let inner = inset_rect(block.inner(area), 1, 0);
-    frame.render_widget(block, area);
-
-    let max_lines = inner.height as usize;
-    let mut lines: Vec<RenderedChatLine> = Vec::new();
-    app.layout.chat.part_toggle_hitboxes.clear();
-
-    for (message_index, message) in app.chat.messages.iter().enumerate() {
-        let role_color = match message.role {
-            ChatMessageRole::System => app.theme.pill_warn_fg,
-            ChatMessageRole::User => app.theme.pill_info_fg,
-            ChatMessageRole::Assistant => app.theme.pill_accent_fg,
-        };
-        lines.push(RenderedChatLine {
-            line: Line::from(vec![
-                Span::styled(
-                    format!(" {} ", message.role.label()),
-                    Style::default().fg(role_color).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    format!(" {}", message.created_at),
-                    Style::default().fg(app.theme.text_muted),
-                ),
-            ]),
-            toggle_key: None,
-        });
-
-        if message.parts.is_empty() {
-            for text_line in message.text.lines() {
-                lines.push(RenderedChatLine {
-                    line: Line::from(Span::styled(
-                        text_line.to_owned(),
-                        Style::default().fg(app.theme.text_secondary),
-                    )),
-                    toggle_key: None,
-                });
-            }
-        } else {
-            for (part_index, part) in message.parts.iter().enumerate() {
-                let part_key = app.chat.part_key(message, message_index, part_index);
-                let expanded = app.chat.is_part_expanded(&part_key);
-                lines.extend(render_chat_part_lines(
-                    part,
-                    app,
-                    inner.width,
-                    Some(part_key),
-                    expanded,
-                ));
-            }
-        }
-        lines.push(RenderedChatLine {
-            line: Line::from(""),
-            toggle_key: None,
-        });
-    }
-
-    if lines.is_empty() {
-        lines.push(RenderedChatLine {
-            line: Line::from(Span::styled(
-                "No messages yet. Press c to compose.",
-                Style::default().fg(app.theme.text_muted),
-            )),
-            toggle_key: None,
-        });
-    }
-
-    let overflow = lines.len().saturating_sub(max_lines);
-    let scroll = app.chat.scroll_lines as usize;
-    let start = overflow.saturating_sub(scroll);
-    let visible = lines
-        .into_iter()
-        .skip(start)
-        .take(max_lines)
-        .collect::<Vec<_>>();
-
-    for (row, rendered) in visible.iter().enumerate() {
-        if let Some(part_key) = rendered.toggle_key.as_ref() {
-            app.layout
-                .chat
-                .part_toggle_hitboxes
-                .push(ChatPartToggleHitbox {
-                    rect: Rect {
-                        x: inner.x,
-                        y: inner.y.saturating_add(row as u16),
-                        width: inner.width,
-                        height: 1,
-                    },
-                    part_key: part_key.clone(),
-                });
-        }
-    }
-
-    frame.render_widget(
-        Paragraph::new(
-            visible
-                .into_iter()
-                .map(|entry| entry.line)
-                .collect::<Vec<_>>(),
-        )
-        .wrap(Wrap { trim: false }),
-        inner,
-    );
-}
-
-fn render_chat_part_lines(
-    part: &ChatMessagePart,
-    app: &App,
-    width: u16,
-    part_key: Option<String>,
-    expanded: bool,
-) -> Vec<RenderedChatLine> {
-    let max = width.saturating_sub(4) as usize;
-    match part {
-        ChatMessagePart::Text(value) => value
-            .lines()
-            .map(|line| RenderedChatLine {
-                line: Line::from(Span::styled(
-                    line.to_owned(),
-                    Style::default().fg(app.theme.text_secondary),
-                )),
-                toggle_key: None,
-            })
-            .collect(),
-        ChatMessagePart::Markdown(value) => value
-            .lines()
-            .enumerate()
-            .map(|(index, line)| {
-                let trimmed = line.trim_start();
-                let style = if trimmed.starts_with('#') {
-                    Style::default()
-                        .fg(app.theme.text_primary)
-                        .add_modifier(Modifier::BOLD)
-                } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
-                    Style::default().fg(app.theme.pill_info_fg)
-                } else {
-                    Style::default().fg(app.theme.text_secondary)
-                };
-                RenderedChatLine {
-                    line: Line::from(Span::styled(line.to_owned(), style)),
-                    toggle_key: if index == 0 && part_key.is_some() && part.is_collapsible() {
-                        part_key.clone()
-                    } else {
-                        None
-                    },
-                }
-            })
-            .collect(),
-        ChatMessagePart::Thinking(value) => {
-            let mut out = vec![RenderedChatLine {
-                line: Line::from(Span::styled(
-                    if expanded {
-                        "▼ 🧠 Thinking"
-                    } else {
-                        "▶ 🧠 Thinking"
-                    },
-                    Style::default()
-                        .fg(app.theme.pill_muted_fg)
-                        .add_modifier(Modifier::ITALIC),
-                )),
-                toggle_key: part_key.clone(),
-            }];
-            if !expanded {
-                let preview = value.lines().next().unwrap_or("(no detail)");
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(
-                        format!("  {}", truncate_to(preview, max)),
-                        Style::default().fg(app.theme.text_muted),
-                    )),
-                    toggle_key: None,
-                });
-                return out;
-            }
-
-            for line in value.lines() {
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(
-                        format!("  {line}"),
-                        Style::default()
-                            .fg(app.theme.text_muted)
-                            .add_modifier(Modifier::ITALIC),
-                    )),
-                    toggle_key: None,
-                });
-            }
-            out
-        }
-        ChatMessagePart::Code { language, code } => {
-            let mut out = Vec::new();
-            let label = language.as_deref().unwrap_or("text");
-            out.push(RenderedChatLine {
-                line: Line::from(Span::styled(
-                    format!("{} ┌─ code ({label})", if expanded { "▼" } else { "▶" }),
-                    Style::default().fg(app.theme.pill_accent_fg),
-                )),
-                toggle_key: part_key.clone(),
-            });
-
-            if !expanded {
-                let code_lines = code.lines().count();
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(
-                        format!("  {} line(s)", code_lines.max(1)),
-                        Style::default().fg(app.theme.text_muted),
-                    )),
-                    toggle_key: None,
-                });
-                return out;
-            }
-
-            for line in code.lines() {
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(
-                        format!("│ {}", truncate_to(line, max)),
-                        Style::default().fg(app.theme.text_primary),
-                    )),
-                    toggle_key: None,
-                });
-            }
-            out.push(RenderedChatLine {
-                line: Line::from(Span::styled(
-                    "└─",
-                    Style::default().fg(app.theme.pill_accent_bg),
-                )),
-                toggle_key: None,
-            });
-            out
-        }
-        ChatMessagePart::ToolCall {
-            name,
-            input,
-            output,
-        } => {
-            let mut out = vec![RenderedChatLine {
-                line: Line::from(Span::styled(
-                    format!("{} ⚙ Tool {name}", if expanded { "▼" } else { "▶" }),
-                    Style::default()
-                        .fg(app.theme.pill_info_fg)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                toggle_key: part_key.clone(),
-            }];
-
-            if !expanded {
-                let has_input = input.as_ref().is_some_and(|value| !value.trim().is_empty());
-                let has_output = output
-                    .as_ref()
-                    .is_some_and(|value| !value.trim().is_empty());
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(
-                        format!(
-                            "  {}{}",
-                            if has_input { "input" } else { "" },
-                            if has_input && has_output {
-                                " + output"
-                            } else if has_output {
-                                "output"
-                            } else {
-                                "metadata"
-                            }
-                        ),
-                        Style::default().fg(app.theme.text_muted),
-                    )),
-                    toggle_key: None,
-                });
-                return out;
-            }
-
-            if let Some(input) = input {
-                for (index, line) in input.lines().enumerate() {
-                    let prefix = if index == 0 { "  ▸ in  " } else { "       " };
-                    out.push(RenderedChatLine {
-                        line: Line::from(Span::styled(
-                            format!("{prefix}{}", truncate_to(line, max)),
-                            Style::default().fg(app.theme.text_muted),
-                        )),
-                        toggle_key: None,
-                    });
-                }
-            }
-            if let Some(output) = output {
-                for (index, line) in output.lines().enumerate() {
-                    let prefix = if index == 0 { "  ▸ out " } else { "       " };
-                    out.push(RenderedChatLine {
-                        line: Line::from(Span::styled(
-                            format!("{prefix}{}", truncate_to(line, max)),
-                            Style::default().fg(app.theme.text_secondary),
-                        )),
-                        toggle_key: None,
-                    });
-                }
-            }
-            out
-        }
-        ChatMessagePart::ShellCommand(value) => vec![RenderedChatLine {
-            line: Line::from(Span::styled(
-                format!("❯ {}", truncate_to(value, max)),
-                Style::default()
-                    .fg(app.theme.pill_info_fg)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            toggle_key: None,
-        }],
-        ChatMessagePart::ShellOutput { output, exit_code } => {
-            let mut out = vec![RenderedChatLine {
-                line: Line::from(Span::styled(
-                    format!("{} ▾ shell output", if expanded { "▼" } else { "▶" }),
-                    Style::default().fg(app.theme.text_muted),
-                )),
-                toggle_key: part_key,
-            }];
-
-            if !expanded {
-                let line_count = output.lines().count().max(1);
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(
-                        format!("  {} line(s)", line_count),
-                        Style::default().fg(app.theme.text_muted),
-                    )),
-                    toggle_key: None,
-                });
-                return out;
-            }
-
-            for line in output.lines() {
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(
-                        format!("  ↳ {}", truncate_to(line, max)),
-                        Style::default().fg(app.theme.text_muted),
-                    )),
-                    toggle_key: None,
-                });
-            }
-            if let Some(code) = exit_code {
-                let style = if *code == 0 {
-                    Style::default().fg(app.theme.pill_ok_fg)
-                } else {
-                    Style::default()
-                        .fg(app.theme.pill_err_fg)
-                        .add_modifier(Modifier::BOLD)
-                };
-                out.push(RenderedChatLine {
-                    line: Line::from(Span::styled(format!("  exit {code}"), style)),
-                    toggle_key: None,
-                });
-            }
-            out
-        }
-        ChatMessagePart::Error(value) => vec![RenderedChatLine {
-            line: Line::from(Span::styled(
-                format!("✖ {}", truncate_to(value, max)),
-                Style::default()
-                    .fg(app.theme.pill_err_fg)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            toggle_key: None,
-        }],
-    }
-}
-
-fn render_chat_composer(frame: &mut Frame, area: Rect, app: &mut App) {
-    let block = Block::default()
-        .title(" Composer ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(if app.chat.composing {
-            app.theme.pane_focused_border
-        } else {
-            app.theme.pane_unfocused_border
-        }));
-    let inner = inset_rect(block.inner(area), 1, 0);
-    frame.render_widget(block, area);
-    if inner.width < 4 || inner.height < 2 {
-        return;
-    }
-
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(1), Constraint::Min(1)])
-        .split(inner);
-
-    let model_text = format!("model:{}", truncate_to(&app.chat.active_model, 28));
-    let agent_text = format!("agent:{}", truncate_to(&app.chat.active_agent, 22));
-    let bridge = app.chat_bridge.status();
-    let source_text = format!("source:{}", bridge.mode.label());
-    let model_width = model_text.chars().count() as u16 + 2;
-    let agent_width = agent_text.chars().count() as u16 + 2;
-    let model_rect = Rect {
-        x: rows[0].x,
-        y: rows[0].y,
-        width: model_width.min(rows[0].width),
-        height: 1,
-    };
-    let agent_x = model_rect
-        .x
-        .saturating_add(model_rect.width)
-        .saturating_add(2);
-    let agent_rect = Rect {
-        x: agent_x,
-        y: rows[0].y,
-        width: agent_width.min(rows[0].right().saturating_sub(agent_x)),
-        height: 1,
-    };
-    app.layout.chat.model_chip_rect = Some(model_rect);
-    app.layout.chat.agent_chip_rect = Some(agent_rect);
-    app.layout.chat.composer_input_rect = Some(rows[1]);
-
-    frame.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(
-                format!(" {model_text} "),
-                Style::default()
-                    .fg(app.theme.pill_accent_fg)
-                    .bg(app.theme.pill_accent_bg),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                format!(" {agent_text} "),
-                Style::default()
-                    .fg(app.theme.pill_info_fg)
-                    .bg(app.theme.pill_info_bg),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                format!(" {source_text} "),
-                Style::default()
-                    .fg(app.theme.pill_warn_fg)
-                    .bg(app.theme.pill_warn_bg),
-            ),
-        ])),
-        rows[0],
-    );
-
-    let composer_line = if app.chat.composing {
-        app.chat.draft_with_cursor()
-    } else {
-        String::from("Press c to compose, enter to send, z to expand/collapse details")
-    };
-    frame.render_widget(
-        Paragraph::new(composer_line).style(Style::default().fg(if app.chat.composing {
-            app.theme.text_primary
-        } else {
-            app.theme.text_muted
-        })),
-        rows[1],
-    );
-}
-
-fn render_model_selector_popup(
-    frame: &mut Frame,
-    parent: Rect,
-    composer_area: Rect,
-    app: &mut App,
-) {
-    if !app.chat.is_model_selector_open() {
-        app.layout.chat.model_selector_rect = None;
-        app.layout.chat.model_selector_list_rect = None;
-        app.layout.chat.model_selector_query_rect = None;
-        app.layout.chat.model_selector_list_start = 0;
-        return;
-    }
-
-    let items = app.chat.model_selector_items();
-    let selected = app
-        .chat
-        .model_selector
-        .selected
-        .min(items.len().saturating_sub(1));
-    let popup = popup_rect(
-        parent,
-        app.chat
-            .model_selector
-            .anchor_col
-            .unwrap_or_else(|| composer_area.x.saturating_add(2)),
-        composer_area.y,
-        34,
-        items.len().max(1),
-        true,
-    );
-    app.layout.chat.model_selector_rect = Some(popup);
-
-    render_popup(
-        frame,
-        popup,
-        "Model Picker",
-        &items,
-        selected,
-        Some((
-            if app.chat.model_selector.raw_mode {
-                String::from("RAW")
-            } else {
-                String::from("FILTER")
-            },
-            if app.chat.model_selector.raw_mode {
-                app.chat.model_selector.raw_input.clone()
-            } else {
-                app.chat.model_selector.query.clone()
-            },
-        )),
-        Some(String::from("enter select  tab raw  esc close")),
-        app,
-        true,
-    );
-}
-
-fn render_agent_selector_popup(
-    frame: &mut Frame,
-    parent: Rect,
-    composer_area: Rect,
-    app: &mut App,
-) {
-    if !app.chat.is_agent_selector_open() {
-        app.layout.chat.agent_selector_rect = None;
-        app.layout.chat.agent_selector_list_rect = None;
-        app.layout.chat.agent_selector_query_rect = None;
-        app.layout.chat.agent_selector_list_start = 0;
-        return;
-    }
-
-    let items = app.chat.agent_selector_items();
-    let selected = app
-        .chat
-        .agent_selector
-        .selected
-        .min(items.len().saturating_sub(1));
-    let popup = popup_rect(
-        parent,
-        app.chat
-            .agent_selector
-            .anchor_col
-            .unwrap_or_else(|| composer_area.x.saturating_add(18)),
-        composer_area.y,
-        28,
-        items.len().max(1),
-        true,
-    );
-    app.layout.chat.agent_selector_rect = Some(popup);
-
-    render_popup(
-        frame,
-        popup,
-        "Agent Picker",
-        &items,
-        selected,
-        Some((
-            String::from("FILTER"),
-            app.chat.agent_selector.query.clone(),
-        )),
-        Some(String::from("enter select  esc close")),
-        app,
-        false,
-    );
-}
-
-fn render_autocomplete_popup(frame: &mut Frame, parent: Rect, composer_area: Rect, app: &mut App) {
-    if !app.chat.is_autocomplete_open()
-        || app.chat.is_model_selector_open()
-        || app.chat.is_agent_selector_open()
-    {
-        app.layout.chat.autocomplete_rect = None;
-        app.layout.chat.autocomplete_list_rect = None;
-        app.layout.chat.autocomplete_list_start = 0;
-        return;
-    }
-
-    let items = app
-        .chat
-        .autocomplete
-        .items
-        .iter()
-        .map(|item| format!("{} [{}]", item.label, item.tag))
-        .collect::<Vec<_>>();
-    let selected = app
-        .chat
-        .autocomplete
-        .selected
-        .min(items.len().saturating_sub(1));
-    let (_, col) = app.chat.autocomplete_anchor_position().unwrap_or((0, 0));
-    let popup = popup_rect(
-        parent,
-        composer_area.x.saturating_add(col as u16),
-        composer_area.y,
-        32,
-        items.len().max(1),
-        false,
-    );
-    app.layout.chat.autocomplete_rect = Some(popup);
-
-    let title = match app.chat.autocomplete_mode() {
-        Some(ComposerAutocompleteMode::Slash) => "Commands",
-        Some(ComposerAutocompleteMode::File) => "Context",
-        None => "Autocomplete",
-    };
-
-    render_popup(
-        frame, popup, title, &items, selected, None, None, app, false,
-    );
-}
-
-fn popup_rect(
-    parent: Rect,
-    anchor_x: u16,
-    anchor_y: u16,
-    min_width: u16,
-    item_len: usize,
-    with_query: bool,
-) -> Rect {
-    let width = min_width.min(parent.width.saturating_sub(2)).max(22);
-    let query_rows = u16::from(with_query);
-    let list_rows = item_len.min(CHAT_POPUP_MAX_VISIBLE).max(1) as u16;
-    let hint_rows = 1u16;
-    let height = (2 + list_rows + query_rows + hint_rows)
-        .min(parent.height.saturating_sub(1))
-        .max(4);
-
-    let x = anchor_x
-        .saturating_sub(width / 2)
-        .clamp(parent.x, parent.right().saturating_sub(width));
-    let y = anchor_y
-        .saturating_sub(height.saturating_sub(1))
-        .clamp(parent.y, parent.bottom().saturating_sub(height));
-    Rect {
-        x,
-        y,
-        width,
-        height,
-    }
-}
-
-fn render_popup(
-    frame: &mut Frame,
-    popup: Rect,
-    title: &str,
-    items: &[String],
-    selected: usize,
-    query: Option<(String, String)>,
-    hint: Option<String>,
-    app: &mut App,
-    is_model: bool,
-) {
-    frame.render_widget(Clear, popup);
-    let block = Block::default()
-        .title(format!(" {title} "))
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(app.theme.pane_focused_border));
-    let inner = inset_rect(block.inner(popup), 1, 0);
-    frame.render_widget(block, popup);
-
-    let mut constraints = vec![Constraint::Min(1)];
-    if query.is_some() {
-        constraints.push(Constraint::Length(1));
-    }
-    if hint.is_some() {
-        constraints.push(Constraint::Length(1));
-    }
-    let sections = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(inner);
-    let list_area = sections[0];
-
-    if is_model {
-        app.layout.chat.model_selector_list_rect = Some(list_area);
-    } else if title == "Agent Picker" {
-        app.layout.chat.agent_selector_list_rect = Some(list_area);
-    } else {
-        app.layout.chat.autocomplete_list_rect = Some(list_area);
-    }
-
-    let viewport = list_viewport(items.len(), list_area.height as usize, selected);
-    if is_model {
-        app.layout.chat.model_selector_list_start = viewport.0;
-    } else if title == "Agent Picker" {
-        app.layout.chat.agent_selector_list_start = viewport.0;
-    } else {
-        app.layout.chat.autocomplete_list_start = viewport.0;
-    }
-
-    let mut lines = Vec::new();
-    for (row, item) in items[viewport.0..viewport.1].iter().enumerate() {
-        let index = viewport.0 + row;
-        let is_selected = index == selected;
-        lines.push(Line::from(vec![
-            Span::styled(
-                if is_selected { "▸ " } else { "  " },
-                Style::default().fg(app.theme.text_muted),
-            ),
-            Span::styled(
-                truncate_to(item, list_area.width.saturating_sub(3) as usize),
-                if is_selected {
-                    Style::default()
-                        .fg(app.theme.pill_accent_fg)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(app.theme.text_secondary)
-                },
-            ),
-        ]));
-    }
-    if lines.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "No matching options.",
-            Style::default().fg(app.theme.text_muted),
-        )));
-    }
-    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), list_area);
-
-    let mut section_index = 1usize;
-    if let Some((label, value)) = query {
-        if section_index < sections.len() {
-            let query_area = sections[section_index];
-            if is_model {
-                app.layout.chat.model_selector_query_rect = Some(query_area);
-            } else {
-                app.layout.chat.agent_selector_query_rect = Some(query_area);
-            }
-            frame.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(
-                        format!(" {label} "),
-                        Style::default()
-                            .fg(app.theme.pill_accent_fg)
-                            .bg(app.theme.pill_accent_bg),
-                    ),
-                    Span::raw(" "),
-                    Span::styled(
-                        format!("{value}_"),
-                        Style::default().fg(app.theme.text_secondary),
-                    ),
-                ])),
-                query_area,
-            );
-        }
-        section_index = section_index.saturating_add(1);
-    }
-
-    if let Some(hint_text) = hint {
-        if section_index < sections.len() {
-            frame.render_widget(
-                Paragraph::new(hint_text).style(Style::default().fg(app.theme.text_muted)),
-                sections[section_index],
-            );
-        }
-    }
-}
-
-fn list_viewport(total: usize, visible: usize, selected: usize) -> (usize, usize) {
-    if total == 0 || visible == 0 {
-        return (0, 0);
-    }
-    if total <= visible {
-        return (0, total);
-    }
-
-    let max_start = total - visible;
-    let mut start = selected.saturating_sub(visible / 2);
-    if start > max_start {
-        start = max_start;
-    }
-    (start, start + visible)
-}
-
 fn fit_preview_text(text: &str, area: Rect) -> String {
     let max_width = area.width.saturating_sub(1) as usize;
     let max_lines = area.height as usize;
@@ -1461,6 +696,11 @@ fn latest_assistant_preview(app: &App) -> Option<String> {
         .rev()
         .find(|message| message.role == ChatMessageRole::Assistant)
         .map(|message| message.preview_line())
+}
+
+fn card_preview_source_text(app: &App, session_key: &str) -> Option<String> {
+    let _ = session_key;
+    latest_assistant_preview(app)
 }
 
 fn preview_excerpt_lines(text: &str, width: usize, max_lines: usize) -> Vec<String> {

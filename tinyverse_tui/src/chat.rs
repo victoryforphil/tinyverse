@@ -202,6 +202,9 @@ pub struct ChatState {
     workspace_file_cache: Vec<String>,
     workspace_file_cache_loaded: bool,
     expanded_part_keys: HashSet<String>,
+    focused_part_key: Option<String>,
+    detail_part_key: Option<String>,
+    detail_scroll_lines: u16,
 }
 
 impl Default for ChatState {
@@ -248,6 +251,9 @@ impl ChatState {
             workspace_file_cache: Vec::new(),
             workspace_file_cache_loaded: false,
             expanded_part_keys: HashSet::new(),
+            focused_part_key: None,
+            detail_part_key: None,
+            detail_scroll_lines: 0,
         }
     }
 
@@ -437,6 +443,23 @@ impl ChatState {
         self.messages = messages;
         self.expanded_part_keys
             .retain(|_| self.collapse_verbose_parts);
+
+        let focused_valid = self
+            .focused_part_key
+            .as_deref()
+            .is_some_and(|key| self.has_part_key(key));
+        if !focused_valid {
+            self.focused_part_key = None;
+        }
+
+        let detail_valid = self
+            .detail_part_key
+            .as_deref()
+            .is_some_and(|key| self.has_part_key(key));
+        if !detail_valid {
+            self.detail_part_key = None;
+            self.detail_scroll_lines = 0;
+        }
     }
 
     pub fn set_models(&mut self, mut models: Vec<String>) {
@@ -474,6 +497,61 @@ impl ChatState {
     pub fn clear_messages(&mut self) {
         self.messages.clear();
         self.scroll_lines = 0;
+        self.focused_part_key = None;
+        self.detail_part_key = None;
+        self.detail_scroll_lines = 0;
+    }
+
+    pub fn set_focused_part_key(&mut self, part_key: Option<String>) {
+        self.focused_part_key = part_key;
+    }
+
+    pub fn focused_part_key(&self) -> Option<&str> {
+        self.focused_part_key.as_deref()
+    }
+
+    pub fn open_detail_modal_for_part(&mut self, part_key: impl Into<String>) {
+        let part_key = part_key.into();
+        self.focused_part_key = Some(part_key.clone());
+        self.detail_part_key = Some(part_key);
+        self.detail_scroll_lines = 0;
+    }
+
+    pub fn open_detail_modal_for_focused(&mut self) -> bool {
+        let Some(part_key) = self.focused_part_key.clone() else {
+            return false;
+        };
+        if !self.has_part_key(&part_key) {
+            return false;
+        }
+        self.detail_part_key = Some(part_key);
+        self.detail_scroll_lines = 0;
+        true
+    }
+
+    pub fn close_detail_modal(&mut self) {
+        self.detail_part_key = None;
+        self.detail_scroll_lines = 0;
+    }
+
+    pub fn is_detail_modal_open(&self) -> bool {
+        self.detail_part_key.is_some()
+    }
+
+    pub fn detail_part_key(&self) -> Option<&str> {
+        self.detail_part_key.as_deref()
+    }
+
+    pub fn detail_scroll_lines(&self) -> u16 {
+        self.detail_scroll_lines
+    }
+
+    pub fn detail_scroll_up(&mut self, amount: u16) {
+        self.detail_scroll_lines = self.detail_scroll_lines.saturating_add(amount.max(1));
+    }
+
+    pub fn detail_scroll_down(&mut self, amount: u16) {
+        self.detail_scroll_lines = self.detail_scroll_lines.saturating_sub(amount.max(1));
     }
 
     pub fn scroll_up(&mut self, amount: u16) {
@@ -800,6 +878,19 @@ impl ChatState {
 
         self.workspace_file_cache = collect_workspace_files(&self.workspace_root, 2000, 6);
         self.workspace_file_cache_loaded = true;
+    }
+
+    fn has_part_key(&self, expected: &str) -> bool {
+        for (message_index, message) in self.messages.iter().enumerate() {
+            for (part_index, _) in message.parts.iter().enumerate() {
+                let part_key = self.part_key(message, message_index, part_index);
+                if part_key == expected {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 }
 
