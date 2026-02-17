@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub use error::TmuxError;
-pub use options::{CapturePaneOptions, ListSessionsOptions, SendKeysOptions, SpawnSessionOptions};
+pub use options::{
+    CapturePaneOptions, ListSessionsOptions, SendKeysOptions, SpawnSessionOptions, SplitDirection,
+};
 pub use types::{
     CapturedPane, PaneTarget, PanelRole, SessionSummary, SessionTarget, SpawnSessionResult,
 };
@@ -50,6 +52,16 @@ impl TmuxClient {
             session.as_str().to_owned(),
         ];
 
+        if let Some(width) = options.initial_window_width {
+            new_session_args.push("-x".to_owned());
+            new_session_args.push(width.to_string());
+        }
+
+        if let Some(height) = options.initial_window_height {
+            new_session_args.push("-y".to_owned());
+            new_session_args.push(height.to_string());
+        }
+
         if let Some(working_dir) = options.working_dir.as_ref() {
             new_session_args.push("-c".to_owned());
             new_session_args.push(working_dir.display().to_string());
@@ -71,13 +83,22 @@ impl TmuxClient {
 
         let mut split_args = vec![
             "split-window".to_owned(),
-            "-h".to_owned(),
             "-P".to_owned(),
             "-F".to_owned(),
             "#{pane_id}".to_owned(),
             "-t".to_owned(),
             agent_pane_id.clone(),
         ];
+
+        split_args.push(match options.split_direction {
+            SplitDirection::Horizontal => "-h".to_owned(),
+            SplitDirection::Vertical => "-v".to_owned(),
+        });
+
+        if let Some(percent) = options.secondary_size_percent {
+            split_args.push("-p".to_owned());
+            split_args.push(percent.to_string());
+        }
 
         if let Some(working_dir) = options.working_dir.as_ref() {
             split_args.push("-c".to_owned());
@@ -98,12 +119,17 @@ impl TmuxClient {
             });
         }
 
+        let (primary_role, secondary_role) = match options.primary_role {
+            PanelRole::Agent => (PanelRole::Agent, PanelRole::Console),
+            PanelRole::Console => (PanelRole::Console, PanelRole::Agent),
+        };
+
         self.run_tmux(vec![
             "select-pane".to_owned(),
             "-t".to_owned(),
             agent_pane_id.clone(),
             "-T".to_owned(),
-            PanelRole::Agent.as_title().to_owned(),
+            primary_role.as_title().to_owned(),
         ])?;
 
         self.run_tmux(vec![
@@ -111,27 +137,32 @@ impl TmuxClient {
             "-t".to_owned(),
             console_pane_id.clone(),
             "-T".to_owned(),
-            PanelRole::Console.as_title().to_owned(),
+            secondary_role.as_title().to_owned(),
         ])?;
 
+        let (resolved_agent_pane_id, resolved_console_pane_id) = match options.primary_role {
+            PanelRole::Agent => (agent_pane_id.clone(), console_pane_id.clone()),
+            PanelRole::Console => (console_pane_id.clone(), agent_pane_id.clone()),
+        };
+
         if let Some(command) = options.console_command.as_deref() {
-            self.send_literal_to_target(&console_pane_id, command, true)?;
+            self.send_literal_to_target(&resolved_console_pane_id, command, true)?;
         }
 
         if let Some(command) = options.agent_command.as_deref() {
-            self.send_literal_to_target(&agent_pane_id, command, true)?;
+            self.send_literal_to_target(&resolved_agent_pane_id, command, true)?;
         }
 
         self.run_tmux(vec![
             "select-pane".to_owned(),
             "-t".to_owned(),
-            console_pane_id.clone(),
+            resolved_console_pane_id.clone(),
         ])?;
 
         Ok(SpawnSessionResult {
             session,
-            console_pane_id,
-            agent_pane_id,
+            console_pane_id: resolved_console_pane_id,
+            agent_pane_id: resolved_agent_pane_id,
         })
     }
 

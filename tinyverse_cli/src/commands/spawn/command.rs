@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use log::info;
-use tinyverse_lib::tmux::{SpawnSessionOptions, TmuxClient};
+use tinyverse_lib::tmux::{PanelRole, SpawnSessionOptions, SplitDirection, TmuxClient};
 use tinyverse_lib::{CreateSessionInput, SessionStore, resolve_session_name};
 use tinyverse_ui::{
     ActionLine, DetailSection, GuidanceLine, LabeledField, Panel, Tone, default_stdout_context,
@@ -8,12 +8,14 @@ use tinyverse_ui::{
 
 use super::args::SpawnArgs;
 use crate::commands::config::store;
+use crate::commands::config::store::{TmuxLayoutDirection, TmuxLayoutPrimary};
 use crate::commands::output::display_session_name;
 use crate::prompts::{resolve_launch_prompt, resolve_user_prompt};
 use crate::providers::{LaunchContext, find_by_key};
 
 pub fn execute(args: SpawnArgs) -> Result<()> {
     let config = store::load()?;
+    validate_tmux_config(&config)?;
     let mut store = SessionStore::open_default()?;
     let session_name = resolve_session_name(args.key.as_deref(), &mut store)?;
     let user_prompt = resolve_user_prompt(args.prompt.as_deref())?;
@@ -40,6 +42,17 @@ pub fn execute(args: SpawnArgs) -> Result<()> {
         options.pane_shell_command = Some("zsh -f".to_owned());
     }
     options.agent_command = Some(agent_command);
+    options.initial_window_width = Some(config.tmux.initial_window_width);
+    options.initial_window_height = Some(config.tmux.initial_window_height);
+    options.split_direction = match config.tmux.layout.direction {
+        TmuxLayoutDirection::Horizontal => SplitDirection::Horizontal,
+        TmuxLayoutDirection::Vertical => SplitDirection::Vertical,
+    };
+    options.primary_role = match config.tmux.layout.primary {
+        TmuxLayoutPrimary::Agent => PanelRole::Agent,
+        TmuxLayoutPrimary::Console => PanelRole::Console,
+    };
+    options.secondary_size_percent = Some(config.tmux.layout.secondary_percent);
 
     let client = TmuxClient::new();
     let result = client
@@ -161,6 +174,20 @@ fn resolve_working_dir(config: &store::TinyverseConfig) -> Result<std::path::Pat
     })
 }
 
+fn validate_tmux_config(config: &store::TinyverseConfig) -> Result<()> {
+    if config.tmux.initial_window_width == 0 {
+        anyhow::bail!("invalid tmux.initial_window_width: must be greater than 0")
+    }
+    if config.tmux.initial_window_height == 0 {
+        anyhow::bail!("invalid tmux.initial_window_height: must be greater than 0")
+    }
+    if !(1..=99).contains(&config.tmux.layout.secondary_percent) {
+        anyhow::bail!("invalid tmux.layout.secondary_percent: must be between 1 and 99")
+    }
+
+    Ok(())
+}
+
 fn expand_config_path(value: &str, cwd: &std::path::Path) -> std::path::PathBuf {
     let expanded = if let Some(stripped) = value.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {
@@ -182,9 +209,9 @@ fn expand_config_path(value: &str, cwd: &std::path::Path) -> std::path::PathBuf 
 #[cfg(test)]
 mod tests {
     use super::SpawnArgs;
-    use super::{resolve_agent_key, resolve_working_dir};
+    use super::{resolve_agent_key, resolve_working_dir, validate_tmux_config};
     use crate::commands::config::store::{
-        GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, WorkspaceConfig,
+        GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig, WorkspaceConfig,
     };
     use crate::prompts::resolve_user_prompt;
 
@@ -213,6 +240,7 @@ mod tests {
                 default_agent: "opencode".to_owned(),
                 default_model: None,
             },
+            tmux: TmuxConfig::default(),
         };
 
         assert_eq!(resolve_agent_key(&args, &config), "opencode");
@@ -227,10 +255,27 @@ mod tests {
             },
             git: GitConfig::default(),
             spawn: SpawnConfig::default(),
+            tmux: TmuxConfig::default(),
         };
 
         let resolved = resolve_working_dir(&config).expect("workspace resolution should succeed");
         assert!(resolved.is_absolute());
         assert!(resolved.is_dir());
+    }
+
+    #[test]
+    fn rejects_invalid_tmux_secondary_percent() {
+        let mut config = TinyverseConfig::default();
+        config.tmux.layout.secondary_percent = 0;
+
+        let result = validate_tmux_config(&config);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn accepts_valid_tmux_layout_config() {
+        let config = TinyverseConfig::default();
+        let result = validate_tmux_config(&config);
+        assert!(result.is_ok());
     }
 }

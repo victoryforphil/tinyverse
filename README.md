@@ -90,7 +90,8 @@
   - `--all` includes unmanaged tmux sessions in addition to DB sessions.
   - `--format={table|text|json|toml|yaml}` (default: `table`)
 - `spawn` // Create a new tinyverse session (console + agent panes).
-  - Pane layout: `agent` on left, `console` on right.
+  - Default pane layout: `agent` on left, `console` on right.
+  - Initial tmux window size and split behavior are configurable via `tmux.*` config keys.
   - `--agent={opencode}` (defaults from `spawn.default_agent` config)
   - `--prompt={file_or_string}`
   - OpenCode receives a default TinyVerse context prompt template from `tinyverse_cli/prompts/opencode_default_context.md`.
@@ -116,6 +117,11 @@
     - `git.branch_prefix` (string)
     - `spawn.default_agent` (string)
     - `spawn.default_model` (string; use `none` to clear)
+    - `tmux.initial_window_width` (integer)
+    - `tmux.initial_window_height` (integer)
+    - `tmux.layout.direction` (`horizontal|vertical`)
+    - `tmux.layout.primary` (`agent|console`)
+    - `tmux.layout.secondary_percent` (`1-99`)
 - `attach <session>` // Attach to an existing session by key or name.
   - Session lookup first tries an exact match.
   - If exact match is not found, tinyverse also tries `tinyverse_<session>`.
@@ -159,6 +165,13 @@ cargo run -p tinyverse_cli -- config set shell.clean true
 cargo run -p tinyverse_cli -- config set spawn.default_agent opencode
 cargo run -p tinyverse_cli -- config set spawn.default_model gpt-5.3-codex
 cargo run -p tinyverse_cli -- config set workspace.default_dir ~/repos/vfp/tinyverse
+
+# Tune default tmux spawn layout
+cargo run -p tinyverse_cli -- config set tmux.initial_window_width 180
+cargo run -p tinyverse_cli -- config set tmux.initial_window_height 54
+cargo run -p tinyverse_cli -- config set tmux.layout.direction horizontal
+cargo run -p tinyverse_cli -- config set tmux.layout.primary agent
+cargo run -p tinyverse_cli -- config set tmux.layout.secondary_percent 40
 
 # Check effective config and export as TOML
 cargo run -p tinyverse_cli -- config print
@@ -243,6 +256,11 @@ workspace.default_dir: <unset>
 git.branch_prefix: tv/
 spawn.default_agent: opencode
 spawn.default_model: <unset>
+tmux.initial_window_width: 180
+tmux.initial_window_height: 54
+tmux.layout.direction: horizontal
+tmux.layout.primary: agent
+tmux.layout.secondary_percent: 40
 ```
 
 ```yaml
@@ -256,4 +274,11 @@ git:
 spawn:
   default_agent: opencode
   default_model: null
+tmux:
+  initial_window_width: 180
+  initial_window_height: 54
+  layout:
+    direction: horizontal
+    primary: agent
+    secondary_percent: 40
 ```

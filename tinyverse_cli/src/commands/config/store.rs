@@ -17,6 +17,8 @@ pub struct TinyverseConfig {
     pub git: GitConfig,
     #[serde(default)]
     pub spawn: SpawnConfig,
+    #[serde(default)]
+    pub tmux: TmuxConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -51,6 +53,60 @@ pub struct SpawnConfig {
     pub default_agent: String,
     #[serde(default)]
     pub default_model: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TmuxConfig {
+    #[serde(default = "default_tmux_initial_window_width")]
+    pub initial_window_width: u16,
+    #[serde(default = "default_tmux_initial_window_height")]
+    pub initial_window_height: u16,
+    #[serde(default)]
+    pub layout: TmuxLayoutConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TmuxLayoutConfig {
+    #[serde(default = "default_tmux_layout_direction")]
+    pub direction: TmuxLayoutDirection,
+    #[serde(default = "default_tmux_layout_primary")]
+    pub primary: TmuxLayoutPrimary,
+    #[serde(default = "default_tmux_layout_secondary_percent")]
+    pub secondary_percent: u8,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TmuxLayoutDirection {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TmuxLayoutPrimary {
+    Agent,
+    Console,
+}
+
+impl Default for TmuxConfig {
+    fn default() -> Self {
+        Self {
+            initial_window_width: default_tmux_initial_window_width(),
+            initial_window_height: default_tmux_initial_window_height(),
+            layout: TmuxLayoutConfig::default(),
+        }
+    }
+}
+
+impl Default for TmuxLayoutConfig {
+    fn default() -> Self {
+        Self {
+            direction: default_tmux_layout_direction(),
+            primary: default_tmux_layout_primary(),
+            secondary_percent: default_tmux_layout_secondary_percent(),
+        }
+    }
 }
 
 impl Default for SpawnConfig {
@@ -90,6 +146,7 @@ struct PartialTinyverseConfig {
     workspace: Option<PartialWorkspaceConfig>,
     git: Option<PartialGitConfig>,
     spawn: Option<PartialSpawnConfig>,
+    tmux: Option<PartialTmuxConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -111,6 +168,20 @@ struct PartialGitConfig {
 struct PartialSpawnConfig {
     default_agent: Option<String>,
     default_model: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PartialTmuxConfig {
+    initial_window_width: Option<u16>,
+    initial_window_height: Option<u16>,
+    layout: Option<PartialTmuxLayoutConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PartialTmuxLayoutConfig {
+    direction: Option<TmuxLayoutDirection>,
+    primary: Option<TmuxLayoutPrimary>,
+    secondary_percent: Option<u8>,
 }
 
 pub fn load() -> Result<TinyverseConfig> {
@@ -215,6 +286,7 @@ fn apply_partial(target: &mut TinyverseConfig, partial: PartialTinyverseConfig) 
         workspace,
         git,
         spawn,
+        tmux,
     } = partial;
 
     if let Some(shell) = shell
@@ -241,6 +313,26 @@ fn apply_partial(target: &mut TinyverseConfig, partial: PartialTinyverseConfig) 
             target.spawn.default_model = Some(default_model);
         }
     }
+
+    if let Some(tmux) = tmux {
+        if let Some(initial_window_width) = tmux.initial_window_width {
+            target.tmux.initial_window_width = initial_window_width;
+        }
+        if let Some(initial_window_height) = tmux.initial_window_height {
+            target.tmux.initial_window_height = initial_window_height;
+        }
+        if let Some(layout) = tmux.layout {
+            if let Some(direction) = layout.direction {
+                target.tmux.layout.direction = direction;
+            }
+            if let Some(primary) = layout.primary {
+                target.tmux.layout.primary = primary;
+            }
+            if let Some(secondary_percent) = layout.secondary_percent {
+                target.tmux.layout.secondary_percent = secondary_percent;
+            }
+        }
+    }
 }
 
 fn default_branch_prefix() -> String {
@@ -249,6 +341,26 @@ fn default_branch_prefix() -> String {
 
 fn default_spawn_agent() -> String {
     "opencode".to_owned()
+}
+
+fn default_tmux_initial_window_width() -> u16 {
+    180
+}
+
+fn default_tmux_initial_window_height() -> u16 {
+    54
+}
+
+fn default_tmux_layout_secondary_percent() -> u8 {
+    40
+}
+
+fn default_tmux_layout_direction() -> TmuxLayoutDirection {
+    TmuxLayoutDirection::Horizontal
+}
+
+fn default_tmux_layout_primary() -> TmuxLayoutPrimary {
+    TmuxLayoutPrimary::Agent
 }
 
 #[cfg(test)]
@@ -286,6 +398,7 @@ mod tests {
                 default_agent: "opencode".to_owned(),
                 default_model: Some("gpt-5".to_owned()),
             },
+            tmux: super::TmuxConfig::default(),
         };
 
         let written = save_to_path(&config, path.clone()).expect("save should succeed");

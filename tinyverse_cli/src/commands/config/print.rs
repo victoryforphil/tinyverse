@@ -168,6 +168,32 @@ fn render_full_table_output(report: &ConfigPrintReport) -> String {
                 .as_deref()
                 .unwrap_or("<unset>")
                 .to_owned(),
+        ])
+        .with_row(vec![
+            "tmux.initial_window_width".to_owned(),
+            report.config.tmux.initial_window_width.to_string(),
+        ])
+        .with_row(vec![
+            "tmux.initial_window_height".to_owned(),
+            report.config.tmux.initial_window_height.to_string(),
+        ])
+        .with_row(vec![
+            "tmux.layout.direction".to_owned(),
+            match report.config.tmux.layout.direction {
+                store::TmuxLayoutDirection::Horizontal => "horizontal".to_owned(),
+                store::TmuxLayoutDirection::Vertical => "vertical".to_owned(),
+            },
+        ])
+        .with_row(vec![
+            "tmux.layout.primary".to_owned(),
+            match report.config.tmux.layout.primary {
+                store::TmuxLayoutPrimary::Agent => "agent".to_owned(),
+                store::TmuxLayoutPrimary::Console => "console".to_owned(),
+            },
+        ])
+        .with_row(vec![
+            "tmux.layout.secondary_percent".to_owned(),
+            report.config.tmux.layout.secondary_percent.to_string(),
         ]);
 
     Panel::new(
@@ -184,7 +210,7 @@ fn render_full_table_output(report: &ConfigPrintReport) -> String {
                 .with_tone(Tone::Info)
                 .render(&context),
             String::new(),
-            SummaryFooter::new("5 config key(s)").render(&context),
+            SummaryFooter::new("10 config key(s)").render(&context),
         ]
         .join("\n"),
     )
@@ -217,7 +243,7 @@ fn render_raw_output(config: &store::TinyverseConfig, format: OutputFormat) -> R
 mod tests {
     use super::{ConfigPrintReport, render_full_output, render_raw_output};
     use crate::commands::config::store::{
-        GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, WorkspaceConfig,
+        GitConfig, ShellConfig, SpawnConfig, TinyverseConfig, TmuxConfig, WorkspaceConfig,
     };
     use crate::commands::output::OutputFormat;
 
@@ -240,6 +266,7 @@ mod tests {
                     default_agent: "opencode".to_owned(),
                     default_model: None,
                 },
+                tmux: TmuxConfig::default(),
             },
         }
     }
