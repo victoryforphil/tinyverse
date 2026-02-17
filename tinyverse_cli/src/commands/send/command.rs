@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use log::info;
-use tinyverse_lib::tmux::{SendKeysOptions, TmuxClient};
 use tinyverse_lib::SessionStore;
+use tinyverse_lib::tmux::{SendKeysOptions, TmuxClient};
 
 use super::args::SendArgs;
 use crate::commands::tmux_helpers::{pane_target_from_selector, resolve_session_target_with_store};

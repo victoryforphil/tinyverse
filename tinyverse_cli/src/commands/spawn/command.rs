@@ -5,7 +5,7 @@ use tinyverse_lib::{CreateSessionInput, SessionStore};
 
 use super::args::SpawnArgs;
 use super::session_name::resolve_session_name;
-use crate::providers::{find_by_key, LaunchContext};
+use crate::providers::{LaunchContext, find_by_key};
 
 pub fn execute(args: SpawnArgs) -> Result<()> {
     let mut store = SessionStore::open_default()?;

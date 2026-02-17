@@ -42,7 +42,7 @@ pub enum Commands {
     Spawn(SpawnArgs),
     /// Attach to a tinyverse session by id or name
     Attach(AttachArgs),
-    /// Kill a tinyverse session by id or name
+    /// Kill a tinyverse session by id/name, or all with --all
     Kill(KillArgs),
     /// View panel text buffer
     View(ViewArgs),

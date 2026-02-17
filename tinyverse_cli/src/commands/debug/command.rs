@@ -3,13 +3,13 @@ use log::info;
 use serde::Serialize;
 use tinyverse_lib::tmux::SessionTarget;
 use tinyverse_lib::{
-    reset_db_with_backup, resolve_tinyverse_paths, SessionStore, TinyverseHomeSource,
+    SessionStore, TinyverseHomeSource, reset_db_with_backup, resolve_tinyverse_paths,
 };
 
 use super::args::{DebugCommands, DebugSelfArgs};
 use crate::commands::output::render_output;
 use crate::commands::tmux_helpers::{
-    current_pane_id, current_session_target, list_pane_snapshots, PaneSnapshot,
+    PaneSnapshot, current_pane_id, current_session_target, list_pane_snapshots,
 };
 
 #[derive(Debug, Serialize)]
@@ -140,8 +140,8 @@ fn format_text_report(report: &DebugSelfReport) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_text_report, DebugSelfReport};
-    use crate::commands::output::{render_output, OutputFormat};
+    use super::{DebugSelfReport, format_text_report};
+    use crate::commands::output::{OutputFormat, render_output};
 
     #[test]
     fn text_render_contains_expected_fields() {

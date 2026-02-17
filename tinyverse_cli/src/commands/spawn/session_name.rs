@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use tinyverse_lib::SessionStore;
 
 pub fn resolve_session_name(user_key: Option<&str>, store: &mut SessionStore) -> Result<String> {
@@ -93,7 +93,7 @@ const CALIFORNIA_CITIES: [&str; 26] = [
 mod tests {
     use std::collections::HashSet;
 
-    use super::{normalize, select_available_city, CALIFORNIA_CITIES};
+    use super::{CALIFORNIA_CITIES, normalize, select_available_city};
 
     #[test]
     fn normalize_keeps_user_provided_key_when_present() {

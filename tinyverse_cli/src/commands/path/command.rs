@@ -1,6 +1,6 @@
 use anyhow::Result;
 use log::info;
-use tinyverse_lib::{resolve_tinyverse_paths, TinyverseHomeSource};
+use tinyverse_lib::{TinyverseHomeSource, resolve_tinyverse_paths};
 
 pub fn execute() -> Result<()> {
     let paths = resolve_tinyverse_paths(None)?;

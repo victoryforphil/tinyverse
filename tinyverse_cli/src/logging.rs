@@ -1,6 +1,6 @@
 use std::io::IsTerminal;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use tinyverse_ui::{ActionLine, DefaultTheme, ErrorBlock, Panel, RenderContext, RenderMode, Tone};
 use tracing::field::{Field, Visit};
 use tracing::{Event, Level, Subscriber};
