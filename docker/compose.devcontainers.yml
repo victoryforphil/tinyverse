@@ -1,0 +1,56 @@
+name: tinyverse
+
+services:
+  run:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: run
+    image: tinyverse/run:local
+    command: ["tinyverse", "--help"]
+    profiles:
+      - run
+
+  agentbox:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: agentbox
+    image: tinyverse/agentbox:local
+    command: ["sleep", "infinity"]
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../:/workspace
+    profiles:
+      - agent
+      - dev
+
+  ci:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: ci
+    image: tinyverse/ci:local
+    working_dir: /workspace
+    command: ["bun", "scripts/ci.sh.ts", "docker"]
+    volumes:
+      - ../:/workspace
+    profiles:
+      - ci
+
+  devcontainer:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: devcontainer
+    image: tinyverse/devcontainer:local
+    command: ["sleep", "infinity"]
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    volumes:
+      - ../:/workspace
+    profiles:
+      - dev

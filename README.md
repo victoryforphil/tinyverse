@@ -70,23 +70,41 @@
   - `moon run tinyverse_lib:check`
   - `moon run tinyverse_cli:test`
 
+## Scripts
+
+- `bun scripts/build.sh.ts` // run `moon :build`
+- `bun scripts/check.sh.ts` // run `moon :check`
+- `bun scripts/test.sh.ts` // run `moon :test`
+- `bun scripts/dev.sh.ts` // run default watch loop for `tinyverse_cli`
+- `bun scripts/ci.sh.ts [mode]` // local CI orchestration (same entrypoints used by GitHub Actions)
+- `bun scripts/docker_build.sh.ts [targets...]` // docker compose build wrapper
+- `bun scripts/docker_ci.sh.ts [run --] [command...]` // run CI command inside `ci` container
+- `bun scripts/docker_publish.sh.ts --image-repo <repo> --tag <tag> [--push]`
+
 ### Commands
 
 - `list` // List tmux sessions known to tinyverse (defaults to tinyverse-only sessions).
   - Source of truth is the local tinyverse SQLite session DB.
   - Reconciles DB sessions against tmux before reads (debounced/rate-limited).
   - `--all` includes unmanaged tmux sessions in addition to DB sessions.
-  - `--format={table|text|json}` (default: `table`)
+  - `--format={table|text|json|toml|yaml}` (default: `table`)
 - `spawn` // Create a new tinyverse session (console + agent panes).
   - Pane layout: `agent` on left, `console` on right.
   - `--agent={opencode}` (defaults from `spawn.default_agent` config)
   - `--prompt={file_or_string}`
+  - OpenCode receives a default TinyVerse context prompt template from `tinyverse_cli/prompts/opencode_default_context.md`.
+  - When `--prompt` is provided, TinyVerse appends it as a `Task Request` section to that default OpenCode context.
   - `--model={model}` (defaults from `spawn.default_model` config when set)
   - `--agent_args={string}` (supports `{prompt}` placeholder)
   - `--clean-shell` (starts panes with `zsh -f`, ignores user `~/.zshrc`)
   - `--no-clean-shell` (forces default shell startup behavior)
   - Working directory defaults to `workspace.default_dir` when configured, otherwise current directory.
-- `config print` // Human-readable config view.
+- `prompt render` // Render effective launch prompt for an agent.
+  - `--agent={opencode}` (default: `opencode`)
+  - `--prompt={file_or_string}`
+- `config print` // Print effective config.
+  - `--output={full|raw}` (default: `full`; `raw` prints config data only)
+  - `--format={table|text|json|toml|yaml}` (default: `table`)
 - `config export` // Export effective config as TOML (with source/path metadata comments).
   - Writes to resolved `active_path` by default.
   - `--path <config_file>` writes to that explicit output file path.
@@ -114,7 +132,7 @@
   - `--session={key_or_name}` (optional inside tmux, required outside tmux)
   - `--panel={console|agent|%pane_id}`
 - `debug self` // Inspect current tmux context.
-  - `--format={table|text|json}`
+  - `--format={table|text|json|toml|yaml}`
 - `debug reset-db` // Backup and reset local tinyverse session DB.
 
 ### Quick Copy/Paste Examples
@@ -126,6 +144,9 @@ cargo run -p tinyverse_cli -- spawn
 
 # Spawn with a prompt string
 cargo run -p tinyverse_cli -- spawn --prompt "you are a helpful coding agent"
+
+# Preview full rendered launch prompt
+cargo run -p tinyverse_cli -- prompt render --agent opencode --prompt "triage failing tests"
 
 # Spawn with clean zsh (no ~/.zshrc)
 cargo run -p tinyverse_cli -- spawn --clean-shell
@@ -141,6 +162,10 @@ cargo run -p tinyverse_cli -- config set workspace.default_dir ~/repos/vfp/tinyv
 # Check effective config and export as TOML
 cargo run -p tinyverse_cli -- config print
 cargo run -p tinyverse_cli -- config export
+
+# Config print as machine formats
+cargo run -p tinyverse_cli -- config print --format yaml
+cargo run -p tinyverse_cli -- config print --output raw --format toml
 
 # Export a specific config file
 cargo run -p tinyverse_cli -- config export --path ./.tinyverse/config.toml
@@ -188,6 +213,10 @@ cargo run -p tinyverse_cli -- view --session tinyverse_123 --panel console --exp
 cargo run -p tinyverse_cli -- debug self
 cargo run -p tinyverse_cli -- debug self --format json
 
+# Debug current context as YAML/TOML
+cargo run -p tinyverse_cli -- debug self --format yaml
+cargo run -p tinyverse_cli -- debug self --format toml
+
 # Backup and reset session DB
 cargo run -p tinyverse_cli -- debug reset-db
 
@@ -196,4 +225,34 @@ cargo run -p tinyverse_cli -- kill tinyverse_123
 
 # Kill and choose from interactive TUI selector
 cargo run -p tinyverse_cli -- kill
+```
+
+### Example outputs
+
+```text
+$ cargo run -p tinyverse_cli -- config print --output full --format text
+selected_source: repo_local
+selected_home: /Users/alex/repos/vfp/tinyverse/.tinyverse
+active_path: /Users/alex/repos/vfp/tinyverse/.tinyverse/config.toml
+legacy_path: /Users/alex/repos/vfp/tinyverse/.tinyverse/tinyverse.toml
+loaded_from: /Users/alex/repos/vfp/tinyverse/.tinyverse/config.toml
+
+shell.clean: false
+workspace.default_dir: <unset>
+git.branch_prefix: tv/
+spawn.default_agent: opencode
+spawn.default_model: <unset>
+```
+
+```yaml
+$ cargo run -p tinyverse_cli -- config print --output raw --format yaml
+shell:
+  clean: false
+workspace:
+  default_dir: null
+git:
+  branch_prefix: tv/
+spawn:
+  default_agent: opencode
+  default_model: null
 ```

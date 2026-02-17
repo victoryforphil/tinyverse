@@ -45,6 +45,14 @@ Testing preference:
 
 Operational commands:
 - Install Moon project dependencies: `moon :install`
+- Build all projects through script wrapper: `bun scripts/build.sh.ts`
+- Check all projects through script wrapper: `bun scripts/check.sh.ts`
+- Test all projects through script wrapper: `bun scripts/test.sh.ts`
+- Start dev watch loop through script wrapper: `bun scripts/dev.sh.ts`
+- Run local CI flow orchestrator: `bun scripts/ci.sh.ts [mode]`
+- Build docker images: `bun scripts/docker_build.sh.ts [targets...]`
+- Run CI command in docker image: `bun scripts/docker_ci.sh.ts [run --] [command...]`
+- Publish docker images (CI/local with auth): `bun scripts/docker_publish.sh.ts --image-repo <repo> --tag <tag> [--push]`
 - Run Moon Rust checks/tests: `moon run tinyverse_cli:check`, `moon run tinyverse_cli:test`
 - Run timestamped insta review capture: `scripts/insta_review.sh.ts -p tinyverse_ui`
 - Render captured snapshot A/B view: `scripts/render_snapshot_review.sh.ts [timestamp]`

@@ -126,16 +126,31 @@ function renderHtml(reviewName: string, diffs: SnapshotDiff[]): string {
   <title>Snapshot Review ${escapeHtml(reviewName)}</title>
   <style>
     :root {
-      color-scheme: light;
+      color-scheme: light dark;
       --bg: #f4f6f8;
       --panel: #ffffff;
       --ink: #20262d;
       --subtle: #5f6b76;
       --line: #d4dde6;
+      --pre-bg: #fbfcfe;
       --changed: #ffd67d;
       --unchanged: #d8e7ff;
       --added: #bfe5bf;
       --removed: #efb4b4;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #11161d;
+        --panel: #171f2a;
+        --ink: #e8edf3;
+        --subtle: #9ea9b8;
+        --line: #2c3a4c;
+        --pre-bg: #0f1722;
+        --changed: #a57a24;
+        --unchanged: #2f4f7e;
+        --added: #2f6b3a;
+        --removed: #7b3d42;
+      }
     }
     body {
       margin: 0;
@@ -194,7 +209,7 @@ function renderHtml(reviewName: string, diffs: SnapshotDiff[]): string {
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fbfcfe;
+      background: var(--pre-bg);
       line-height: 1.4;
       font-size: 12px;
       white-space: pre;
