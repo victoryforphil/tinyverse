@@ -3,7 +3,14 @@
 import { resolve } from "node:path";
 import { findRepoRoot } from "../helpers/run_root.sh.ts";
 
-type SourceKey = "opencode" | "elysia" | "prisma" | "moonrepo" | "ratatui_web" | "ratatui_docs";
+type SourceKey =
+  | "opencode"
+  | "elysia"
+  | "prisma"
+  | "moonrepo"
+  | "ratatui_web"
+  | "ratatui_docs"
+  | "docsrs";
 
 const SCRAPER_SCRIPT_BY_SOURCE: Record<SourceKey, string> = {
   opencode: "scripts/scrapes/scrape_opencode_docs.sh.ts",
@@ -12,10 +19,11 @@ const SCRAPER_SCRIPT_BY_SOURCE: Record<SourceKey, string> = {
   moonrepo: "scripts/scrapes/scrape_moonrepo_docs.sh.ts",
   ratatui_web: "scripts/scrapes/scrape_ratatui_web_docs.sh.ts",
   ratatui_docs: "scripts/scrapes/scrape_ratatui_docs_docs.sh.ts",
+  docsrs: "scripts/scrapes/scrape_docsrs_docs.sh.ts",
 };
 
 const sourceArg = Bun.argv[2] as SourceKey | undefined;
-const outputArg = Bun.argv[3];
+const scriptArgs = Bun.argv.slice(3);
 const source = sourceArg ?? "opencode";
 
 if (!(source in SCRAPER_SCRIPT_BY_SOURCE)) {
@@ -27,7 +35,7 @@ if (!(source in SCRAPER_SCRIPT_BY_SOURCE)) {
 
 const repoRoot = findRepoRoot(import.meta.dir);
 const scriptPath = resolve(repoRoot, SCRAPER_SCRIPT_BY_SOURCE[source]);
-const args = outputArg ? [scriptPath, outputArg] : [scriptPath];
+const args = [scriptPath, ...scriptArgs];
 
 console.log(`Docs // Scrape // Dispatching scraper (source=${source},script=${scriptPath})`);
 

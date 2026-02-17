@@ -26,13 +26,51 @@ export type DocsRsDiscoveryOptions = {
 const DOCS_RS_ROOT = "https://docs.rs";
 const DOCS_RS_HOST = "docs.rs";
 
+function normalizeDocsRsModulePath(value: string): string {
+  const normalized = value.replace(/^\/+|\/+$/g, "");
+  return normalized || "";
+}
+
 export function docsRsRootUrl(target: DocsRsTarget): string {
-  const modulePath = target.modulePath.replace(/^\/+|\/+$/g, "");
-  return `${DOCS_RS_ROOT}/${target.crateName}/${target.version}/${modulePath}/`;
+  const modulePath = normalizeDocsRsModulePath(target.modulePath);
+  const suffix = modulePath ? `/${modulePath}` : "";
+  return `${DOCS_RS_ROOT}/${target.crateName}/${target.version}${suffix}/`;
 }
 
 export function docsRsPathPrefix(target: DocsRsTarget): string {
-  return `/${target.crateName}/${target.version}/${target.modulePath.replace(/^\/+|\/+$/g, "")}`;
+  const modulePath = normalizeDocsRsModulePath(target.modulePath);
+  return modulePath
+    ? `/${target.crateName}/${target.version}/${modulePath}`
+    : `/${target.crateName}/${target.version}`;
+}
+
+export function parseDocsRsTargetFromUrl(url: string): DocsRsTarget {
+  let parsed: URL;
+
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Docs // Scrape // Invalid docs.rs URL (url=${url})`);
+  }
+
+  if (parsed.hostname !== DOCS_RS_HOST) {
+    throw new Error(`Docs // Scrape // Unsupported host for docs.rs scrape (host=${parsed.hostname})`);
+  }
+
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  const crateName = segments[0] ?? "";
+  const version = segments[1] ?? "";
+  const modulePath = segments.slice(2).join("/") || crateName;
+
+  if (!crateName || !version) {
+    throw new Error(`Docs // Scrape // Missing crate or version in docs.rs URL (url=${url})`);
+  }
+
+  return {
+    crateName,
+    version,
+    modulePath,
+  };
 }
 
 export function docsRsSitemapUrlForCrate(crateName: string): string {
