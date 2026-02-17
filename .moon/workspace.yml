@@ -1,0 +1,8 @@
+$schema: "https://moonrepo.dev/schemas/workspace.json"
+
+projects:
+  tinyverse_lib: "tinyverse_lib"
+  tinyverse_cli: "tinyverse_cli"
+
+vcs:
+  manager: "git"

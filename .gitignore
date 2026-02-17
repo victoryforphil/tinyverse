@@ -9,3 +9,7 @@ build/
 target/
 
 .proto/
+
+.moon/cache/
+.moon/docker/
+.moon/tasks/

@@ -36,6 +36,15 @@
 - Preferred Rust test runner: `cargo nextest run`
 - Fallback when `cargo-nextest` is unavailable or fails in this environment: `cargo test`
 
+## Moon
+
+- Moon workspace config lives in `.moon/workspace.yml` and `.moon/toolchains.yml`.
+- Rust project configs live in `tinyverse_lib/moon.yml` and `tinyverse_cli/moon.yml`.
+- Example commands:
+  - `moon :install`
+  - `moon run tinyverse_lib:check`
+  - `moon run tinyverse_cli:test`
+
 ### Commands
 
 - `list` // List tmux sessions known to tinyverse (defaults to tinyverse-only sessions).

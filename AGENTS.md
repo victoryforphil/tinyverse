@@ -23,6 +23,8 @@ Minimal guidance for coding agents in `tinyverse`.
 - Generated external docs: `docs/external/<source>/*.ext.md` plus `index.ext.md`.
 - Rust CLI: `tinyverse_cli/src/`.
 - Rust CLI commands: `tinyverse_cli/src/commands/<command>/`.
+- Moon workspace config: `.moon/workspace.yml` and `.moon/toolchains.yml`.
+- Moon Rust project configs: `tinyverse_lib/moon.yml` and `tinyverse_cli/moon.yml`.
 
 ## Setup
 
@@ -32,7 +34,7 @@ Minimal guidance for coding agents in `tinyverse`.
 ## Build / Lint / Test
 
 Current state:
-- No dedicated root build config.
+- Moon workspace tasks are available for Rust projects.
 - No dedicated root lint config.
 - Rust CLI tests are available in `tinyverse_cli`.
 
@@ -41,8 +43,11 @@ Testing preference:
 - If `cargo nextest` is unavailable or errors due to environment/tooling, fall back to `cargo test`.
 
 Operational commands:
+- Install Moon project dependencies: `moon :install`
+- Run Moon Rust checks/tests: `moon run tinyverse_cli:check`, `moon run tinyverse_cli:test`
 - Dispatch scraper: `scripts/scrapes/scrape_docs.sh.ts <source> [output_dir]`
 - Run scraper directly: `scripts/scrapes/scrape_<source>_docs.sh.ts [output_dir]`
+- Diesel scraper: `scripts/scrapes/scrape_docs.sh.ts diesel [output_dir]`
 - Ratatui website scraper: `scripts/scrapes/scrape_docs.sh.ts ratatui [output_dir]`
 - Docs.rs scraper: `scripts/scrapes/scrape_docs.sh.ts docsrs [docs_rs_url] [output_dir]`
 
