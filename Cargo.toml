@@ -1,0 +1,9 @@
+
+
+[workspace]
+members = [
+    "tinyverse_cli",
+    "tinyverse_lib",
+]
+
+resolver = "3"
